@@ -612,12 +612,12 @@ class MT5LiveTrader:
         if self.robot.shield_status.get("halted", False):
             return ScalpingSignal.HOLD
 
-        # Primary Buy Setup: Price bounces off lower BB, EMA bullish, RSI oversold recovery
-        if close <= bb_lower and fast_ema >= slow_ema:
+        # Primary Buy Setup: Price bounces off lower BB, EMA bullish, RSI not overbought
+        if close <= bb_lower and fast_ema >= slow_ema and rsi < 60.0:
             return ScalpingSignal.BUY
 
-        # Primary Sell Setup: Price rejects upper BB, EMA bearish, RSI overbought exhaustion
-        if close >= bb_upper and fast_ema <= slow_ema:
+        # Primary Sell Setup: Price rejects upper BB, EMA bearish, RSI not oversold
+        if close >= bb_upper and fast_ema <= slow_ema and rsi > 40.0:
             return ScalpingSignal.SELL
 
         # Secondary Trend-Pullback entries (TIGHTENED: RSI thresholds from 52/48 to 45/55)

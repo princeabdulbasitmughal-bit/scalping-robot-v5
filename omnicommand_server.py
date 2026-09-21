@@ -7,6 +7,7 @@ import json
 import os
 import time
 from pathlib import Path
+from datetime import datetime, timezone
 
 try:
     from fastapi import FastAPI
@@ -24,6 +25,11 @@ except ImportError:
 START_TIME = time.time()
 STATUS_FILE = Path(__file__).parent / "live_status.json"
 
+# File read cache — avoids hammering disk on every 2s poll
+_status_cache: dict = {}
+_status_cache_ts: float = 0.0
+_STATUS_CACHE_TTL: float = 2.0  # seconds
+
 app = FastAPI(title="OmniCommand Pro", version="5.0.0")
 
 app.add_middleware(
@@ -35,11 +41,17 @@ app.add_middleware(
 
 
 def read_live_status() -> dict:
-    """Safely read live_status.json with fallback."""
+    """Safely read live_status.json with in-memory TTL cache (2s) to reduce disk I/O."""
+    global _status_cache, _status_cache_ts
+    now = time.monotonic()
+    if now - _status_cache_ts < _STATUS_CACHE_TTL and _status_cache:
+        return _status_cache
     try:
         if STATUS_FILE.exists():
             raw = STATUS_FILE.read_bytes()
-            return json.loads(raw.decode("utf-8", errors="replace"))
+            _status_cache = json.loads(raw.decode("utf-8", errors="replace"))
+            _status_cache_ts = now
+            return _status_cache
     except Exception as e:
         return {"error": str(e), "status": "READ_ERROR"}
     return {"status": "NO_DATA"}
@@ -62,10 +74,8 @@ async def health():
     try:
         updated_str = live.get("updated_at", "")
         if updated_str:
-            from datetime import timezone
-            import datetime as dt
-            updated_dt = dt.datetime.fromisoformat(updated_str.replace("Z", "+00:00"))
-            age_sec = (dt.datetime.now(timezone.utc) - updated_dt).total_seconds()
+            updated_dt = datetime.fromisoformat(updated_str.replace("Z", "+00:00"))
+            age_sec = (datetime.now(timezone.utc) - updated_dt).total_seconds()
             trader_alive = age_sec < 300  # 5 min threshold
     except Exception:
         trader_alive = live.get("status", "") != ""
@@ -88,7 +98,9 @@ async def health():
         "symbol": live.get("symbol", "XAUUSD"),
         "last_signal": live.get("last_signal", "NONE"),
         "spread_pips": live.get("spread_pips", 0),
+        "rolling_spread_ema": live.get("rolling_spread_ema", 0),
         "current_price": live.get("current_price", 0),
+        "latency_metrics": live.get("latency_metrics", {}),
         "updated_at": live.get("updated_at", ""),
     })
 
