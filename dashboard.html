@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -242,7 +242,7 @@
       <div class="svc-card">
         <div class="svc-left">
           <div class="svc-icon" style="background:var(--amber-dim);border:1px solid rgba(240,165,0,.2)">&#x1F680;</div>
-          <div><div class="svc-name">SuperSender</div><div class="svc-port">localhost:5050</div></div>
+          <div><div class="svc-name">SuperSender</div><div class="svc-port">localhost:5051</div></div>
         </div>
         <div class="pill pill-down" id="svc-supersender"><span class="dot dot-down"></span>CHECKING</div>
       </div>
@@ -299,6 +299,10 @@
             <span class="badge" style="color:var(--muted);border-color:var(--border)">&#x2014;</span></td></tr>
           <tr><td class="td-lbl">Symbol</td><td style="color:var(--amber)">XAUUSD</td>
             <td><span class="badge" style="color:var(--amber);border-color:rgba(240,165,0,.3);background:var(--amber-dim)">GOLD</span></td></tr>
+          <tr><td class="td-lbl">Net P&L (Total)</td><td id="net_pnl" style="color:var(--green)">&#x2014;</td>
+            <td><span class="badge" style="color:var(--muted);border-color:var(--border)">SESSION</span></td></tr>
+          <tr><td class="td-lbl">Trader Status</td><td id="trader_alive" style="color:var(--green)">&#x2014;</td>
+            <td><span class="badge pill-up"><span class="dot dot-up" style="width:6px;height:6px"></span>MONITOR</span></td></tr>
         </tbody>
       </table>
     </div>
@@ -489,7 +493,7 @@ async function checkSvc(url,id){
   catch{setStatus(id,false);}
 }
 function checkAll(){
-  Promise.allSettled([checkSvc('http://localhost:5050/','svc-supersender'),
+  Promise.allSettled([checkSvc('http://localhost:5051/','svc-supersender'),
     checkSvc('http://localhost:5051/','svc-api'),
     checkSvc('http://localhost:8899/','svc-omnitrade')]);
 }
@@ -504,16 +508,18 @@ async function poll(){
     if(d.balance!=null){q('balance').textContent=fmtUSD(d.balance);setMilestone(d.balance);}
     if(d.equity!=null)q('equity').textContent=fmtUSD(d.equity);
     if(d.daily_pnl!=null)setPnL(d.daily_pnl);
+    if(d.net_pnl!=null){var np=Number(d.net_pnl),npEl=q('net_pnl');if(npEl){npEl.textContent=(np>=0?'+':'')+fmtUSD(np);npEl.style.color=np>=0?'var(--green)':'var(--red)';}}
     if(d.win_rate_pct!=null)setWinRate(Number(d.win_rate_pct));
     if(d.total_trades!=null)q('total_trades').textContent=d.total_trades;
     if(d.open_positions!=null)q('open_positions').textContent=d.open_positions;
     if(d.last_signal)q('last_signal').textContent=d.last_signal;
     if(d.spread_pips!=null)q('spread_pips').textContent=d.spread_pips+' pips';
     if(d.uptime_sec!=null)q('uptime_sec').textContent=fmtUptime(d.uptime_sec);
+    var aliveEl=q('trader_alive');if(aliveEl){aliveEl.textContent=d.trader_alive?'ALIVE':'STALE';aliveEl.style.color=d.trader_alive?'var(--green)':'var(--red)';}
     setDataAge(d.updated_at);
     q('ft-dot').style.background='var(--green)';
     q('ft-lbl').textContent='MT5 BRIDGE: CONNECTED';q('ft-lbl').style.color='var(--green)';
-    addLog('XAUUSD <span class="tkey">$'+(d.current_price||'&#x2014;')+'</span> | Spread <span class="tval">'+(d.spread_pips||'&#x2014;')+' pips</span> | Signal <span class="tkey">'+(d.last_signal||'&#x2014;')+'</span> | Bal <span class="tval">$'+(d.balance||'&#x2014;')+'</span>');
+    addLog('XAUUSD <span class="tkey">$'+(d.current_price||'&mdash;')+'</span> | Spread <span class="tval">'+(d.spread_pips||'&mdash;')+' pips</span> | Signal <span class="tkey">'+(d.last_signal||'&mdash;')+'</span> | Bal <span class="tval">$'+(d.balance||'&mdash;')+'</span> | NET <span class="'+(d.net_pnl>=0?'tval':'terr')+'">'+(d.net_pnl>=0?'+':'')+fmtUSD(d.net_pnl||0)+'</span> | Trader <span class="'+(d.trader_alive?'tval':'terr')+'">'+(d.trader_alive?'ALIVE':'STALE')+'</span>');
   }catch(e){
     errCount++;
     q('ft-dot').style.background='var(--red)';q('ft-lbl').textContent='MT5 BRIDGE: DISCONNECTED';q('ft-lbl').style.color='var(--red)';
