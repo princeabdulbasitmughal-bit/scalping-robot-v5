@@ -1,0 +1,34 @@
+; ====================================================================
+; Scalping Robot V5 Pro - Optimized Institutional Preset
+; Preset Name: Conservative_EURUSD_M5.set
+; Target Symbol: EURUSD (Euro / US Dollar)
+; Recommended Timeframe: M5 (5-Minute)
+; Risk Profile: Low Risk / High Consistency
+; ====================================================================
+MagicNumber=55502
+Lots=0.02
+AutoLot=false
+RiskPercent=1.0
+MaxOrders=1
+TakeProfit=80
+StopLoss=150
+TrailingStop=50
+TrailingStep=15
+UseTrailingStop=true
+UseBreakEven=true
+BreakEvenTrigger=40
+BreakEvenStep=10
+Slippage=2
+MaxSpread=18
+FastEMA=9
+SlowEMA=26
+RSI_Period=14
+RSI_Oversold=32
+RSI_Overbought=68
+UseTimeFilter=true
+StartHour=7
+EndHour=17
+UseMartingale=false
+MartingaleMultiplier=1.0
+CloseFriday=true
+FridayCloseHour=19

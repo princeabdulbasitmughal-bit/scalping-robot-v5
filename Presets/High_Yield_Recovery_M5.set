@@ -1,0 +1,36 @@
+; ====================================================================
+; Scalping Robot V5 Pro - Optimized Institutional Preset
+; Preset Name: High_Yield_Recovery_M5.set
+; Target Symbol: GBPUSD / USDJPY / EURUSD
+; Recommended Timeframe: M5 (5-Minute)
+; Risk Profile: Controlled Recovery (Max 2 Levels, Hard Stop at 3% Equity)
+; ====================================================================
+MagicNumber=55503
+Lots=0.01
+AutoLot=false
+RiskPercent=2.0
+MaxOrders=2
+TakeProfit=100
+StopLoss=200
+TrailingStop=60
+TrailingStep=20
+UseTrailingStop=true
+UseBreakEven=true
+BreakEvenTrigger=50
+BreakEvenStep=15
+Slippage=2
+MaxSpread=22
+FastEMA=8
+SlowEMA=21
+RSI_Period=14
+RSI_Oversold=28
+RSI_Overbought=72
+UseTimeFilter=true
+StartHour=8
+EndHour=17
+UseMartingale=true
+MartingaleMultiplier=1.3
+MaxRecoveryOrders=2
+MaxAccountDrawdownPercent=3.0
+CloseFriday=true
+FridayCloseHour=19

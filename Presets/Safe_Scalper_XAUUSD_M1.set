@@ -1,0 +1,34 @@
+; ====================================================================
+; Scalping Robot V5 Pro - Optimized Institutional Preset
+; Preset Name: Safe_Scalper_XAUUSD_M1.set
+; Target Symbol: XAUUSD (Gold)
+; Recommended Timeframe: M1 (1-Minute)
+; Risk Profile: Conservative / Capital Preservation
+; ====================================================================
+MagicNumber=55501
+Lots=0.01
+AutoLot=false
+RiskPercent=1.5
+MaxOrders=1
+TakeProfit=150
+StopLoss=300
+TrailingStop=100
+TrailingStep=30
+UseTrailingStop=true
+UseBreakEven=true
+BreakEvenTrigger=80
+BreakEvenStep=20
+Slippage=3
+MaxSpread=35
+FastEMA=8
+SlowEMA=21
+RSI_Period=14
+RSI_Oversold=30
+RSI_Overbought=70
+UseTimeFilter=true
+StartHour=8
+EndHour=18
+UseMartingale=false
+MartingaleMultiplier=1.0
+CloseFriday=true
+FridayCloseHour=20

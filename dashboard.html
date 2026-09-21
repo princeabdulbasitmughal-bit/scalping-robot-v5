@@ -1,0 +1,532 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SCALPING ROBOT V5 PRO — XAUUSD Trading Terminal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#0d1117;--surface:#161b22;--surface2:#1c2333;--border:#30363d;--border2:#21262d;
+      --text:#e6edf3;--muted:#7d8590;--amber:#f0a500;--amber-dim:rgba(240,165,0,.15);
+      --green:#3fb950;--green-dim:rgba(63,185,80,.15);--red:#f85149;--red-dim:rgba(248,81,73,.15);
+      --blue:#58a6ff;--blue-dim:rgba(88,166,255,.12);--yellow:#e3b341;--yellow-dim:rgba(227,179,65,.15);
+      --purple:#a371f7;--r:10px;--mono:'JetBrains Mono',monospace;--sans:'Inter',sans-serif;
+    }
+    html{scroll-behavior:smooth}
+    body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;
+      display:flex;flex-direction:column;font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+    ::-webkit-scrollbar{width:6px;height:6px}
+    ::-webkit-scrollbar-track{background:var(--surface)}
+    ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+    ::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+    /* STALE ALERT */
+    #stale-alert{display:none;background:var(--red-dim);border-bottom:2px solid var(--red);
+      color:var(--red);font-family:var(--mono);font-size:13px;font-weight:700;text-align:center;
+      padding:10px;letter-spacing:.1em;animation:stale-flash 1s ease-in-out infinite;position:sticky;top:64px;z-index:90}
+    @keyframes stale-flash{0%,100%{opacity:1}50%{opacity:.4}}
+    /* HEADER */
+    header{background:rgba(22,27,34,.97);border-bottom:1px solid var(--border);backdrop-filter:blur(20px);
+      position:sticky;top:0;z-index:100;padding:0 24px;height:64px;display:flex;align-items:center;
+      justify-content:space-between;gap:16px}
+    .hdr-left{display:flex;align-items:center;gap:14px}
+    .logo{width:42px;height:42px;background:linear-gradient(135deg,#f0a500,#ff6b35);border-radius:10px;
+      display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;
+      box-shadow:0 0 20px rgba(240,165,0,.35)}
+    .title{font-family:var(--mono);font-size:15px;font-weight:800;color:var(--text);letter-spacing:.06em;white-space:nowrap}
+    .subtitle{font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:1px}
+    .live-badge{display:inline-flex;align-items:center;gap:6px;background:var(--green-dim);
+      border:1px solid rgba(63,185,80,.4);color:var(--green);font-family:var(--mono);font-size:11px;
+      font-weight:700;padding:4px 10px;border-radius:20px;letter-spacing:.08em;white-space:nowrap}
+    .live-dot{width:7px;height:7px;background:var(--green);border-radius:50%;flex-shrink:0;
+      animation:pulse-live 1.4s ease-in-out infinite}
+    @keyframes pulse-live{0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 0 0 rgba(63,185,80,.5)}
+      50%{opacity:.6;transform:scale(.85);box-shadow:0 0 0 5px rgba(63,185,80,0)}}
+    .hdr-right{display:flex;align-items:center;gap:10px;flex-shrink:0}
+    .clock-box{font-family:var(--mono);font-size:13px;color:var(--muted);background:var(--surface2);
+      border:1px solid var(--border);padding:6px 14px;border-radius:var(--r);letter-spacing:.06em;white-space:nowrap}
+    .clock-box span.val{color:var(--text);font-weight:600}
+    .hdr-link{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--surface2);
+      border:1px solid var(--border);padding:6px 12px;border-radius:var(--r);text-decoration:none;
+      transition:all .2s;white-space:nowrap}
+    .hdr-link:hover{color:var(--blue);border-color:var(--blue);background:var(--blue-dim)}
+    /* MAIN */
+    main{flex:1;padding:20px;max-width:1440px;margin:0 auto;width:100%}
+    .section{margin-bottom:20px}
+    .sec-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    .sec-title{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;
+      display:flex;align-items:center;gap:8px}
+    .sec-title::before{content:'';display:block;width:3px;height:14px;border-radius:2px}
+    .st-amber::before{background:var(--amber)}.st-green::before{background:var(--green)}.st-blue::before{background:var(--blue)}
+    /* CARDS */
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+      padding:18px 20px;position:relative;overflow:hidden;transition:border-color .2s,box-shadow .2s}
+    .card:hover{box-shadow:0 4px 24px rgba(0,0,0,.4)}
+    .card-bar{position:absolute;top:0;left:0;right:0;height:3px;border-radius:var(--r) var(--r) 0 0}
+    .bar-amber{background:linear-gradient(90deg,var(--amber),#ff8c00)}
+    .bar-green{background:linear-gradient(90deg,var(--green),#26d954)}
+    .bar-red{background:linear-gradient(90deg,var(--red),#ff3b30)}
+    .bar-yellow{background:linear-gradient(90deg,var(--yellow),#ffcc00)}
+    .bar-blue{background:linear-gradient(90deg,var(--blue),#79c0ff)}
+    .bar-purple{background:linear-gradient(90deg,var(--purple),#6e40c9)}
+    .lbl{font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
+    .val{font-family:var(--mono);font-size:28px;font-weight:800;line-height:1.1;margin-bottom:6px;font-variant-numeric:tabular-nums}
+    .sub{font-size:12px;color:var(--muted);font-family:var(--mono)}
+    /* GRID */
+    .g6{display:grid;grid-template-columns:repeat(6,1fr);gap:14px}
+    .g3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+    .g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    /* STATUS */
+    .svc-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+      padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .svc-left{display:flex;align-items:center;gap:10px}
+    .svc-icon{width:38px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+    .svc-name{font-size:13px;font-weight:600;color:var(--text)}
+    .svc-port{font-family:var(--mono);font-size:11px;color:var(--muted)}
+    .pill{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;font-weight:700;
+      padding:5px 12px;border-radius:20px;border:1px solid;letter-spacing:.06em}
+    .pill-up{color:var(--green);background:var(--green-dim);border-color:rgba(63,185,80,.35)}
+    .pill-down{color:var(--red);background:var(--red-dim);border-color:rgba(248,81,73,.35)}
+    .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+    .dot-up{background:var(--green);animation:pulse-live 1.4s infinite}
+    .dot-down{background:var(--red)}
+    /* CHART */
+    .chart-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+    .chart-hdr{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;
+      justify-content:space-between;gap:12px;background:var(--surface2)}
+    .chart-ttl{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:700;color:var(--text)}
+    .sym-badge{font-family:var(--mono);font-size:12px;color:var(--amber);background:var(--amber-dim);
+      border:1px solid rgba(240,165,0,.3);padding:3px 10px;border-radius:6px;font-weight:700}
+    #tv-body{height:520px;width:100%}
+    /* FEED TABLE */
+    .feed-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+    .feed-hdr{padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surface2);
+      display:flex;align-items:center;justify-content:space-between}
+    .feed-hdr-title{font-size:13px;font-weight:700;color:var(--text)}
+    table.feed{width:100%;border-collapse:collapse}
+    table.feed th{font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;
+      text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface2)}
+    table.feed td{font-family:var(--mono);font-size:12px;color:var(--text);padding:11px 14px;
+      border-bottom:1px solid var(--border2)}
+    table.feed tr:last-child td{border-bottom:none}
+    table.feed tr:hover td{background:var(--surface2)}
+    .td-lbl{color:var(--muted);font-size:11px}
+    .badge{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11px;
+      font-weight:700;padding:3px 9px;border-radius:20px;border:1px solid}
+    /* MILESTONE */
+    .ms-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px}
+    .ms-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+    .ms-title{font-size:13px;font-weight:700;color:var(--text)}
+    .ms-pct{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--amber)}
+    .track{height:10px;background:var(--surface2);border-radius:5px;overflow:hidden;
+      border:1px solid var(--border);margin-bottom:10px}
+    .fill{height:100%;border-radius:5px;background:linear-gradient(90deg,#f0a500,#ff8c00,#ff6b35);
+      transition:width .8s cubic-bezier(.4,0,.2,1);box-shadow:0 0 10px rgba(240,165,0,.5)}
+    .ms-lbrow{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--muted)}
+    .ms-lbrow .active{color:var(--amber);font-weight:700}
+    .ms-mini{flex:1;min-width:80px;background:var(--surface2);border:1px solid var(--border);
+      border-radius:6px;padding:8px 12px}
+    .ms-mini-lbl{font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+    .ms-mini-val{font-family:var(--mono);font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+    /* TELE */
+    .tele-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+    .tele-hdr{padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface2);
+      display:flex;align-items:center;justify-content:space-between}
+    .tele-log{background:#010409;padding:12px;height:160px;overflow-y:auto;font-family:var(--mono);
+      font-size:11px;color:var(--muted)}
+    .tele-log .en{padding:2px 0;line-height:1.5}
+    .ts{color:#3d444d}.tkey{color:var(--amber)}.tval{color:var(--green)}.terr{color:var(--red)}
+    /* CF */
+    .cf-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px}
+    .cf-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+    .cf-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+      padding:14px 16px;text-decoration:none;display:flex;align-items:flex-start;gap:12px;transition:all .2s}
+    .cf-card:hover{border-color:var(--amber);background:var(--amber-dim);transform:translateY(-1px);
+      box-shadow:0 4px 16px rgba(240,165,0,.15)}
+    .cf-icon{width:36px;height:36px;border-radius:8px;background:var(--amber-dim);
+      border:1px solid rgba(240,165,0,.25);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+    .cf-name{font-size:13px;font-weight:600;color:var(--text);margin-bottom:3px}
+    .cf-url{font-family:var(--mono);font-size:10px;color:var(--muted);word-break:break-all;line-height:1.4}
+    .cf-card:hover .cf-url{color:var(--amber)}
+    /* FOOTER */
+    footer{background:var(--surface);border-top:1px solid var(--border);padding:14px 24px;
+      display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+    .ft-left{font-size:12px;color:var(--muted)}
+    .ft-right{display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+    .ft-sep{color:var(--border)}
+    /* RESPONSIVE */
+    @media(max-width:1200px){.g6{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:900px){.g6{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:1fr}.cf-grid{grid-template-columns:1fr}}
+    @media(max-width:600px){.g2{grid-template-columns:1fr}.g6{grid-template-columns:1fr 1fr}.val{font-size:22px}
+      #tv-body{height:340px}header{height:auto;min-height:64px;flex-wrap:wrap;padding:12px 14px;gap:10px}}
+  </style>
+</head>
+<body>
+
+<!-- STALE BANNER -->
+<div id="stale-alert">&#x26A0;&#xFE0F; &nbsp;STALE DATA &#8212; Last update &gt; 2 minutes ago. MT5 connection may be offline. &nbsp;&#x26A0;&#xFE0F;</div>
+
+<!-- HEADER -->
+<header>
+  <div class="hdr-left">
+    <div class="logo">&#x1F916;</div>
+    <div>
+      <div class="title">SCALPING ROBOT V5 PRO</div>
+      <div class="subtitle">Autonomous XAUUSD High-Frequency Engine</div>
+    </div>
+    <div class="live-badge"><span class="live-dot"></span>XAUUSD &bull; LIVE</div>
+  </div>
+  <div class="hdr-right">
+    <div class="clock-box">&#x1F552; <span class="val" id="clock">--:--:--</span> &nbsp;<span style="color:var(--border)">|</span>&nbsp; <span id="clock-date" style="color:var(--muted)">---</span></div>
+    <a href="/health" target="_blank" class="hdr-link">&#x26A1; /health JSON</a>
+  </div>
+</header>
+
+<main>
+
+  <!-- STATS ROW -->
+  <div class="section">
+    <div class="sec-hdr">
+      <div class="sec-title st-amber">&#x26A1; Live Performance Metrics</div>
+      <div style="font-family:var(--mono);font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px;">
+        <span class="live-dot" style="width:6px;height:6px;"></span>Poll: 2000ms
+      </div>
+    </div>
+    <div class="g6">
+      <div class="card">
+        <div class="card-bar bar-amber"></div>
+        <div class="lbl">&#x26A1; Gold Price (XAUUSD)</div>
+        <div class="val" id="current_price" style="color:var(--amber)">$&#x2014;</div>
+        <div class="sub">Spot price &bull; Live feed</div>
+      </div>
+      <div class="card">
+        <div class="card-bar bar-green"></div>
+        <div class="lbl">&#x1F3E6; Account Balance</div>
+        <div class="val" id="balance" style="color:var(--green)">$&#x2014;</div>
+        <div class="sub">Equity: <span id="equity">&#x2014;</span></div>
+      </div>
+      <div class="card">
+        <div class="card-bar" id="pnl-bar" style="background:linear-gradient(90deg,var(--green),#26d954)"></div>
+        <div class="lbl">&#x1F4C8; Net P&amp;L Today</div>
+        <div class="val" id="daily_pnl" style="color:var(--green)">$&#x2014;</div>
+        <div class="sub">Daily profit / loss</div>
+      </div>
+      <div class="card">
+        <div class="card-bar" id="wr-bar" style="background:linear-gradient(90deg,var(--green),#26d954)"></div>
+        <div class="lbl">&#x1F3AF; Win Rate</div>
+        <div class="val" id="win_rate_pct" style="color:var(--green)">&#x2014;%</div>
+        <div class="sub">Trade accuracy score</div>
+      </div>
+      <div class="card">
+        <div class="card-bar bar-blue"></div>
+        <div class="lbl">&#x1F4CA; Total Trades</div>
+        <div class="val" id="total_trades" style="color:var(--blue)">&#x2014;</div>
+        <div class="sub">All closed positions</div>
+      </div>
+      <div class="card">
+        <div class="card-bar bar-purple"></div>
+        <div class="lbl">&#x1F504; Open Positions</div>
+        <div class="val" id="open_positions" style="color:var(--purple)">&#x2014;</div>
+        <div class="sub">Active trades in market</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SYSTEM STATUS -->
+  <div class="section">
+    <div class="sec-hdr"><div class="sec-title st-green">&#x1F6E1; System Services</div></div>
+    <div class="g3">
+      <div class="svc-card">
+        <div class="svc-left">
+          <div class="svc-icon" style="background:var(--amber-dim);border:1px solid rgba(240,165,0,.2)">&#x1F680;</div>
+          <div><div class="svc-name">SuperSender</div><div class="svc-port">localhost:5050</div></div>
+        </div>
+        <div class="pill pill-down" id="svc-supersender"><span class="dot dot-down"></span>CHECKING</div>
+      </div>
+      <div class="svc-card">
+        <div class="svc-left">
+          <div class="svc-icon" style="background:var(--blue-dim);border:1px solid rgba(88,166,255,.2)">&#x2699;&#xFE0F;</div>
+          <div><div class="svc-name">Trading API</div><div class="svc-port">localhost:5051</div></div>
+        </div>
+        <div class="pill pill-down" id="svc-api"><span class="dot dot-down"></span>CHECKING</div>
+      </div>
+      <div class="svc-card">
+        <div class="svc-left">
+          <div class="svc-icon" style="background:var(--green-dim);border:1px solid rgba(63,185,80,.2)">&#x1F310;</div>
+          <div><div class="svc-name">OmniTrade Engine</div><div class="svc-port">localhost:8899</div></div>
+        </div>
+        <div class="pill pill-down" id="svc-omnitrade"><span class="dot dot-down"></span>CHECKING</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CHART -->
+  <div class="section">
+    <div class="chart-wrap">
+      <div class="chart-hdr">
+        <div class="chart-ttl"><span style="font-size:18px">&#x1F4CA;</span> Live Candlestick Chart<div class="sym-badge">XAUUSD</div></div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted)">Gold / US Dollar &bull; M5 &bull; Dark Theme</div>
+      </div>
+      <div id="tv-body">
+        <div class="tradingview-widget-container" style="height:100%;width:100%">
+          <div id="tv_chart" style="height:100%;width:100%"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIVE FEED + MILESTONE + TELE -->
+  <div class="g2 section">
+    <!-- Feed -->
+    <div class="feed-wrap">
+      <div class="feed-hdr">
+        <div class="feed-hdr-title">&#x1F4E1; Live Feed</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted)" id="last-upd">Last update: &#x2014;</div>
+      </div>
+      <table class="feed">
+        <thead><tr><th>Metric</th><th>Value</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="td-lbl">Last Signal</td><td id="last_signal" style="color:var(--amber)">&#x2014;</td>
+            <td><span class="badge" style="color:var(--muted);border-color:var(--border)">ENGINE</span></td></tr>
+          <tr><td class="td-lbl">Spread (Pips)</td><td id="spread_pips" style="color:var(--blue)">&#x2014;</td>
+            <td><span class="badge pill-up"><span class="dot dot-up" style="width:6px;height:6px"></span>TIGHT</span></td></tr>
+          <tr><td class="td-lbl">Server Uptime</td><td id="uptime_sec" style="color:var(--green)">&#x2014;</td>
+            <td><span class="badge pill-up"><span class="dot dot-up" style="width:6px;height:6px"></span>ONLINE</span></td></tr>
+          <tr><td class="td-lbl">Data Age</td><td id="data-age-val">&#x2014;</td><td id="data-age-status">
+            <span class="badge" style="color:var(--muted);border-color:var(--border)">&#x2014;</span></td></tr>
+          <tr><td class="td-lbl">Symbol</td><td style="color:var(--amber)">XAUUSD</td>
+            <td><span class="badge" style="color:var(--amber);border-color:rgba(240,165,0,.3);background:var(--amber-dim)">GOLD</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Right col -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Milestone -->
+      <div class="ms-card">
+        <div class="ms-hdr">
+          <div>
+            <div class="ms-title">&#x1F3C6; Profit Milestone Tracker</div>
+            <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:3px">$10,000 &#x2192; $10,300 Goal</div>
+          </div>
+          <div class="ms-pct" id="ms-pct">0.0%</div>
+        </div>
+        <div class="track"><div class="fill" id="ms-fill" style="width:0%"></div></div>
+        <div class="ms-lbrow">
+          <span>$10,000 <span style="font-weight:400">(Start)</span></span>
+          <span id="ms-cur" class="active">&#x2014;</span>
+          <span>$10,300 <span style="font-weight:400">(Goal)</span></span>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+          <div class="ms-mini">
+            <div class="ms-mini-lbl">Remaining</div>
+            <div class="ms-mini-val" id="ms-rem" style="color:var(--amber)">&#x2014;</div>
+          </div>
+          <div class="ms-mini">
+            <div class="ms-mini-lbl">Net Gained</div>
+            <div class="ms-mini-val" id="ms-gain" style="color:var(--green)">&#x2014;</div>
+          </div>
+        </div>
+      </div>
+      <!-- Telemetry -->
+      <div class="tele-wrap">
+        <div class="tele-hdr">
+          <div style="font-size:13px;font-weight:700;color:var(--text)">&#x2B1B; Telemetry Stream</div>
+          <div style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--green)">
+            <span class="live-dot" style="width:6px;height:6px"></span>LIVE
+          </div>
+        </div>
+        <div class="tele-log" id="telemetry">
+          <div class="en"><span class="ts">[INIT]</span> <span style="color:#58a6ff">Connecting to OmniTrade at port 8899&#x2026;</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CLOUDFLARE -->
+  <div class="section">
+    <div class="cf-wrap">
+      <div class="sec-hdr" style="margin-bottom:0">
+        <div class="sec-title st-amber">&#x2601;&#xFE0F; Cloudflare Tunnel Endpoints</div>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--green);display:flex;align-items:center;gap:5px">
+          <span class="dot dot-up" style="width:6px;height:6px"></span>PUBLIC ACCESS ACTIVE
+        </span>
+      </div>
+      <div class="cf-grid">
+        <a href="https://springs-protein-announce-asus.trycloudflare.com" target="_blank" rel="noopener" class="cf-card">
+          <div class="cf-icon">&#x1F5A5;&#xFE0F;</div>
+          <div>
+            <div class="cf-name">Trading Terminal Dashboard</div>
+            <div class="cf-url">https://springs-protein-announce-asus.trycloudflare.com</div>
+          </div>
+        </a>
+        <a href="https://manuals-shipping-iso-legends.trycloudflare.com" target="_blank" rel="noopener" class="cf-card">
+          <div class="cf-icon">&#x26A1;</div>
+          <div>
+            <div class="cf-name">OmniTrade API Endpoint</div>
+            <div class="cf-url">https://manuals-shipping-iso-legends.trycloudflare.com</div>
+          </div>
+        </a>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <div class="ft-left">&copy; 2026 <strong>Scalping Robot V5 Pro</strong> &mdash; Powered by MetaTrader 5 &amp; OmniTrade Engine</div>
+  <div class="ft-right">
+    <div style="display:flex;align-items:center;gap:6px">
+      <span class="dot" id="ft-dot" style="background:var(--muted)"></span>
+      <span id="ft-lbl">CONNECTING&hellip;</span>
+    </div>
+    <span class="ft-sep">|</span><span>XAUUSD &bull; M5 SCALP</span>
+    <span class="ft-sep">|</span><span>NVIDIA RTX A6000</span>
+  </div>
+</footer>
+
+<script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+<script>
+(function(){
+'use strict';
+var GOAL_START=10000,GOAL_TARGET=10300,POLL_MS=2000,STALE_SECS=120;
+var errCount=0;
+
+/* CLOCK */
+function tick(){
+  var n=new Date(),p=function(x){return String(x).padStart(2,'0')};
+  document.getElementById('clock').textContent=p(n.getHours())+':'+p(n.getMinutes())+':'+p(n.getSeconds());
+  document.getElementById('clock-date').textContent=n.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'});
+}
+setInterval(tick,1000);tick();
+
+/* CHART */
+function initChart(){
+  if(typeof TradingView==='undefined'){setTimeout(initChart,500);return;}
+  new TradingView.widget({
+    autosize:true,symbol:'FX_IDC:XAUUSD',interval:'5',timezone:'Etc/UTC',
+    theme:'dark',style:'1',locale:'en',toolbar_bg:'#161b22',
+    enable_publishing:false,hide_side_toolbar:false,allow_symbol_change:true,
+    container_id:'tv_chart',withdateranges:true,save_image:false,
+    backgroundColor:'#0d1117',gridColor:'rgba(48,54,61,0.5)'
+  });
+}
+window.addEventListener('DOMContentLoaded',initChart);
+
+/* HELPERS */
+function q(id){return document.getElementById(id);}
+function fmtN(n,d){return Number(n).toLocaleString('en-US',{minimumFractionDigits:d||2,maximumFractionDigits:d||2});}
+function fmtUSD(n){return '$'+fmtN(n);}
+function fmtUptime(s){
+  var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60);
+  if(h>0)return h+'h '+m+'m '+sec+'s';
+  if(m>0)return m+'m '+sec+'s';
+  return sec+'s';
+}
+
+function setStatus(id,up){
+  var el=q(id);
+  el.innerHTML=up?'<span class="dot dot-up"></span>UP':'<span class="dot dot-down"></span>DOWN';
+  el.className='pill '+(up?'pill-up':'pill-down');
+}
+
+function addLog(msg){
+  var box=q('telemetry');
+  var ts=new Date().toLocaleTimeString('en-US',{hour12:false});
+  var d=document.createElement('div');d.className='en';
+  d.innerHTML='<span class="ts">['+ts+']</span> '+msg;
+  box.appendChild(d);
+  if(box.children.length>30)box.removeChild(box.children[0]);
+  box.scrollTop=box.scrollHeight;
+}
+
+function setWinRate(wr){
+  var el=q('win_rate_pct'),bar=q('wr-bar');
+  el.textContent=wr+'%';
+  if(wr>=60){el.style.color='var(--green)';bar.style.background='linear-gradient(90deg,var(--green),#26d954)';}
+  else if(wr>=40){el.style.color='var(--yellow)';bar.style.background='linear-gradient(90deg,var(--yellow),#ffcc00)';}
+  else{el.style.color='var(--red)';bar.style.background='linear-gradient(90deg,var(--red),#ff3b30)';}
+}
+
+function setPnL(pnl){
+  var el=q('daily_pnl'),bar=q('pnl-bar'),n=Number(pnl);
+  el.textContent=(n>=0?'+':'')+fmtUSD(n);
+  if(n>=0){el.style.color='var(--green)';bar.style.background='linear-gradient(90deg,var(--green),#26d954)';}
+  else{el.style.color='var(--red)';bar.style.background='linear-gradient(90deg,var(--red),#ff3b30)';}
+}
+
+function setMilestone(bal){
+  var b=Number(bal),gained=Math.max(0,b-GOAL_START),range=GOAL_TARGET-GOAL_START;
+  var pct=Math.min(100,Math.max(0,(gained/range)*100)),rem=Math.max(0,GOAL_TARGET-b);
+  q('ms-fill').style.width=pct.toFixed(2)+'%';
+  q('ms-pct').textContent=pct.toFixed(1)+'%';
+  q('ms-cur').textContent=fmtUSD(b);
+  q('ms-gain').textContent='+'+fmtUSD(gained);
+  q('ms-rem').textContent=fmtUSD(rem);
+}
+
+function setDataAge(updatedAt){
+  if(!updatedAt)return;
+  var age=Math.floor((Date.now()-new Date(updatedAt).getTime())/1000);
+  q('last-upd').textContent='Last update: '+new Date(updatedAt).toLocaleTimeString();
+  var el=q('data-age-val'),st=q('data-age-status'),ageStr,ageColor;
+  if(age<60){ageStr=age+'s ago';ageColor='var(--green)';}
+  else if(age<120){ageStr=Math.floor(age/60)+'m ago';ageColor='var(--yellow)';}
+  else{ageStr=Math.floor(age/60)+'m ago';ageColor='var(--red)';}
+  el.textContent=ageStr;el.style.color=ageColor;
+  if(age<30)st.innerHTML='<span class="badge pill-up"><span class="dot dot-up" style="width:6px;height:6px"></span>FRESH</span>';
+  else if(age<120)st.innerHTML='<span class="badge" style="color:var(--yellow);border-color:rgba(227,179,65,.35);background:var(--yellow-dim)">AGING</span>';
+  else st.innerHTML='<span class="badge pill-down">&#x26A0; STALE</span>';
+  q('stale-alert').style.display=age>STALE_SECS?'block':'none';
+}
+
+/* SERVICE CHECK */
+async function checkSvc(url,id){
+  try{var r=await fetch(url,{method:'GET',signal:AbortSignal.timeout(3000)});setStatus(id,r.ok||r.status<500);}
+  catch{setStatus(id,false);}
+}
+function checkAll(){
+  Promise.allSettled([checkSvc('http://localhost:5050/','svc-supersender'),
+    checkSvc('http://localhost:5051/','svc-api'),
+    checkSvc('http://localhost:8899/','svc-omnitrade')]);
+}
+
+/* HEALTH POLL */
+async function poll(){
+  try{
+    var r=await fetch('/health',{signal:AbortSignal.timeout(4000)});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    var d=await r.json();errCount=0;
+    if(d.current_price!=null)q('current_price').textContent=fmtUSD(d.current_price);
+    if(d.balance!=null){q('balance').textContent=fmtUSD(d.balance);setMilestone(d.balance);}
+    if(d.equity!=null)q('equity').textContent=fmtUSD(d.equity);
+    if(d.daily_pnl!=null)setPnL(d.daily_pnl);
+    if(d.win_rate_pct!=null)setWinRate(Number(d.win_rate_pct));
+    if(d.total_trades!=null)q('total_trades').textContent=d.total_trades;
+    if(d.open_positions!=null)q('open_positions').textContent=d.open_positions;
+    if(d.last_signal)q('last_signal').textContent=d.last_signal;
+    if(d.spread_pips!=null)q('spread_pips').textContent=d.spread_pips+' pips';
+    if(d.uptime_sec!=null)q('uptime_sec').textContent=fmtUptime(d.uptime_sec);
+    setDataAge(d.updated_at);
+    q('ft-dot').style.background='var(--green)';
+    q('ft-lbl').textContent='MT5 BRIDGE: CONNECTED';q('ft-lbl').style.color='var(--green)';
+    addLog('XAUUSD <span class="tkey">$'+(d.current_price||'&#x2014;')+'</span> | Spread <span class="tval">'+(d.spread_pips||'&#x2014;')+' pips</span> | Signal <span class="tkey">'+(d.last_signal||'&#x2014;')+'</span> | Bal <span class="tval">$'+(d.balance||'&#x2014;')+'</span>');
+  }catch(e){
+    errCount++;
+    q('ft-dot').style.background='var(--red)';q('ft-lbl').textContent='MT5 BRIDGE: DISCONNECTED';q('ft-lbl').style.color='var(--red)';
+    if(errCount===1)addLog('<span class="terr">&#x26A0; Health error: '+e.message+'</span>');
+  }
+}
+
+document.addEventListener('DOMContentLoaded',function(){
+  poll();checkAll();
+  setInterval(poll,POLL_MS);
+  setInterval(checkAll,15000);
+});
+})();
+</script>
+</body>
+</html>
