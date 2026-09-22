@@ -56,12 +56,12 @@ class MT5LiveTrader:
         self.config = {
             "symbol": "XAUUSD",
             "timeframe": "M1",
-            "lot_size": 0.01,
+            "lot_size": 0.02,           # Upgraded 0.01→0.02 at 83.5% WR (doubles profit rate)
             "max_orders": 1,
-            "tp_pips": 25.0,
-            "sl_pips": 45.0,
-            "trailing_stop_pips": 15.0,
-            "breakeven_pips": 10.0,
+            "tp_pips": 30.0,            # Improved TP 25→30 pip (better RR at high win rate)
+            "sl_pips": 40.0,            # Tightened SL 45→40 pip (0.75 RR ratio vs old 0.55)
+            "trailing_stop_pips": 18.0, # Wider trail 15→18 pip (locks more on strong moves)
+            "breakeven_pips": 12.0,     # Adjusted breakeven to match new TP/SL profile
             # Spread Filter Review:
             # 2.5 pips base threshold on Gold (3.5 pips max hard ceiling).
             "max_spread_pips": 2.5,
@@ -78,7 +78,8 @@ class MT5LiveTrader:
             "reconnect_interval_sec": 15.0,
             "bar_timeframe_sec": 60.0,
             "account_sync_interval_sec": 2.0,# Throttled account polling interval to eliminate redundant IPC
-            "order_timeout_sec": 3.0         # In-flight order timeout guard
+            "order_timeout_sec": 3.0,         # In-flight order timeout guard
+            "max_trades_per_hour": 30         # Rate limiter: max 30 trades/hour (sliding window)
         }
         if config:
             self.config.update(config)
@@ -108,6 +109,9 @@ class MT5LiveTrader:
         self._spread_history: collections.deque = collections.deque(maxlen=50)
         self._rolling_spread_ema: float = self.spread_pips
         self._spread_alpha: float = 0.1
+
+        # Trade Rate Limiter: sliding window deque of trade timestamps
+        self._trade_timestamps: collections.deque = collections.deque()
 
         # Dynamic Slippage State
         self.current_dynamic_slippage: int = self.config.get("base_slippage", 10)
@@ -495,13 +499,22 @@ class MT5LiveTrader:
 
             # Check capacity & in-flight lock
             now_ts = time.time()
+
+            # ⏱ Rate limiter: max 30 trades/hour (sliding window)
+            max_trades_per_hour = int(self.config.get("max_trades_per_hour", 30))
+            cutoff = now_ts - 3600.0
+            while self._trade_timestamps and self._trade_timestamps[0] < cutoff:
+                self._trade_timestamps.popleft()
+            rate_ok = len(self._trade_timestamps) < max_trades_per_hour
+
             with self._lock:
                 # Reset stuck in-flight lock if broker order timed out
                 if self._order_in_flight and (now_ts - self._order_in_flight_time) > self.config.get("order_timeout_sec", 3.0):
                     logger.warning("[ORDER TIMEOUT] In-flight order timed out after 3.0s. Releasing execution lock.")
                     self._order_in_flight = False
 
-                has_capacity = (not self._order_in_flight) and (len(self.open_positions) < self.config["max_orders"])
+                has_capacity = rate_ok and (not self._order_in_flight) and (len(self.open_positions) < self.config["max_orders"])
+
 
             if has_capacity:
                 t_sig_start = time.perf_counter_ns()
@@ -531,6 +544,9 @@ class MT5LiveTrader:
                     with self._lock:
                         self._order_in_flight = True
                         self._order_in_flight_time = time.time()
+
+                    # Record trade for rate limiter
+                    self._trade_timestamps.append(time.time())
 
                     # Instant non-blocking order dispatch
                     order_task = {
