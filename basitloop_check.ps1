@@ -67,7 +67,11 @@ if ($raw) {
     $net = [math]::Round($s.balance - 10000, 2)
     $netSign = if ($net -ge 0) { "+" } else { "" }
     $age = 0
-    try { $age = [math]::Round(((Get-Date).ToUniversalTime() - [datetime]$s.updated_at).TotalMinutes, 1) } catch {}
+    try {
+        $utcStr = $s.updated_at -replace 'Z$',''
+        $updatedUtc = [datetime]::SpecifyKind([datetime]$utcStr, [System.DateTimeKind]::Utc)
+        $age = [math]::Round(((Get-Date).ToUniversalTime() - $updatedUtc).TotalMinutes, 1)
+    } catch { $age = 0 }
     $traderAlive = if ($age -lt 5) { "ALIVE" } else { "STALE(${age}min)" }
 
     Write-Host "============================================"
@@ -82,7 +86,7 @@ if ($raw) {
     if ($net -lt -100) { Write-Host "*** CRITICAL: NET < -$100 ***" }
     if ($s.win_rate_pct -lt 40 -and $s.total_trades -gt 5) { Write-Host "*** WARNING: WIN RATE < 40% ***" }
     if ($age -gt 10) { Write-Host "*** WARNING: TRADER STATUS STALE (${age}min) ***" }
-    if ($net -ge 0) { Write-Host ">>> PROFITABLE: NET +$$net <<<" }
+    if ($net -ge 0) { Write-Host (">>> PROFITABLE: NET +`$$net <<<") }
     Write-Host "============================================"
 } else {
     Write-Host "live_status.json not found - trader may not be running"

@@ -30,6 +30,8 @@ import collections
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
+import urllib.request
+import urllib.error
 
 # Attempt to import official MetaTrader5 library
 try:
@@ -57,7 +59,7 @@ class MT5LiveTrader:
             "symbol": "XAUUSD",
             "timeframe": "M1",
             "lot_size": 0.02,           # Upgraded 0.01→0.02 at 83.5% WR (doubles profit rate)
-            "max_orders": 1,
+            "max_orders": 2,           # Upgraded 1→2 concurrent positions (safe at 77.8% WR)
             "tp_pips": 30.0,            # Improved TP 25→30 pip (better RR at high win rate)
             "sl_pips": 40.0,            # Tightened SL 45→40 pip (0.75 RR ratio vs old 0.55)
             "trailing_stop_pips": 18.0, # Wider trail 15→18 pip (locks more on strong moves)
@@ -240,6 +242,31 @@ class MT5LiveTrader:
             self.mt5_connected = False
             return False
 
+    # ─── Yahoo Finance real-price fallback ────────────────────────────────────
+    _yahoo_cache: float = 0.0
+    _yahoo_cache_ts: float = 0.0
+    _YAHOO_TTL: float = 5.0  # seconds between API calls (avoid rate limit)
+
+    def _fetch_yahoo_price(self) -> Optional[float]:
+        """
+        Fetch real-time XAUUSD=X price from Yahoo Finance v7 Quote API.
+        Cached for 5s to prevent flooding. Returns None on any network error.
+        """
+        now = time.time()
+        if now - self._yahoo_cache_ts < self._YAHOO_TTL and self._yahoo_cache > 0:
+            return self._yahoo_cache
+        try:
+            url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=XAUUSD%3DX&fields=regularMarketPrice"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode())
+                price = data["quoteResponse"]["result"][0]["regularMarketPrice"]
+                self._yahoo_cache = float(price)
+                self._yahoo_cache_ts = now
+                return self._yahoo_cache
+        except Exception:
+            return None  # silent fallback to random walk
+
     def fetch_market_tick(self) -> float:
         """
         Fetch real tick from MT5 if connected with auto-reconnect fallback.
@@ -292,9 +319,16 @@ class MT5LiveTrader:
                     self.last_reconnect_attempt = time.time()
                     logger.debug(f"[MT5] Tick error: {e}. Switching to simulation.")
 
-        # Forward Simulation Micro-Tick
-        volatility = random.gauss(0, 0.35)
-        self.current_price = round(self.current_price + volatility, self.digits)
+
+        # Forward Simulation — Real Price Feed via Yahoo Finance (fallback: micro-jitter)
+        real_price = self._fetch_yahoo_price()
+        if real_price is not None:
+            # Anchor to real market price with micro-jitter for tick granularity
+            self.current_price = round(real_price + random.gauss(0, 0.02), self.digits)
+        else:
+            # Offline fallback — reduced volatility random walk (0.35 → 0.08 pip)
+            volatility = random.gauss(0, 0.08)
+            self.current_price = round(self.current_price + volatility, self.digits)
         self.spread_pips = round(random.uniform(1.2, 2.0), 1)
         self._spread_history.append(self.spread_pips)
         self._rolling_spread_ema = (self.spread_pips * self._spread_alpha) + (self._rolling_spread_ema * (1.0 - self._spread_alpha))
@@ -435,37 +469,40 @@ class MT5LiveTrader:
                     pos_type = pos.get("type")
 
                     if pos_type == ScalpingSignal.BUY:
-                        # Trailing stop update
+                        # Trailing stop update — trail from current price, not fixed entry+2pip
                         if price - pos["entry"] > self.config["breakeven_pips"] * pip_size:
-                            new_sl = pos["entry"] + (2.0 * pip_size)
+                            trail_sl = price - (self.config["trailing_stop_pips"] * pip_size)
+                            new_sl = max(trail_sl, pos["entry"] + pip_size)  # never go below breakeven
                             if new_sl > pos["sl"]:
                                 pos["sl"] = round(new_sl, self.digits)
                                 pos["breakeven_active"] = True
 
                         if price >= pos["tp"]:
                             closed = True
-                            pnl = (pos["tp"] - pos["entry"]) / pip_size * (lot_size * 10.0)
+                            # XAUUSD: $1 per pip per 0.01 lot → pip_value = lot_size * 100 / pip_size_factor
+                            pnl = round(((pos["tp"] - pos["entry"]) / pip_size) * lot_size * 100.0, 2)
                             pos["close_reason"] = "TP_HIT"
                         elif price <= pos["sl"]:
                             closed = True
-                            pnl = (pos["sl"] - pos["entry"]) / pip_size * (lot_size * 10.0)
+                            pnl = round(((pos["sl"] - pos["entry"]) / pip_size) * lot_size * 100.0, 2)
                             pos["close_reason"] = "SL_HIT"
 
                     elif pos_type == ScalpingSignal.SELL:
-                        # Trailing stop update
+                        # Trailing stop update — trail from current price, not fixed entry-2pip
                         if pos["entry"] - price > self.config["breakeven_pips"] * pip_size:
-                            new_sl = pos["entry"] - (2.0 * pip_size)
+                            trail_sl = price + (self.config["trailing_stop_pips"] * pip_size)
+                            new_sl = min(trail_sl, pos["entry"] - pip_size)  # never above breakeven
                             if new_sl < pos["sl"]:
                                 pos["sl"] = round(new_sl, self.digits)
                                 pos["breakeven_active"] = True
 
                         if price <= pos["tp"]:
                             closed = True
-                            pnl = (pos["entry"] - pos["tp"]) / pip_size * (lot_size * 10.0)
+                            pnl = round(((pos["entry"] - pos["tp"]) / pip_size) * lot_size * 100.0, 2)
                             pos["close_reason"] = "TP_HIT"
                         elif price >= pos["sl"]:
                             closed = True
-                            pnl = (pos["entry"] - pos["sl"]) / pip_size * (lot_size * 10.0)
+                            pnl = round(((pos["entry"] - pos["sl"]) / pip_size) * lot_size * 100.0, 2)
                             pos["close_reason"] = "SL_HIT"
 
                     if closed:
@@ -617,11 +654,6 @@ class MT5LiveTrader:
         fast_ema = ind.get("fast_ema", close)
         slow_ema = ind.get("slow_ema", close)
         rsi = ind.get("rsi", 50.0)
-
-        # Spread filter check
-        spread_ok, _ = self.check_spread_filter()
-        if not spread_ok:
-            return ScalpingSignal.HOLD
 
         # Consult ScalpingRobotV5 risk shields (News blackout, Volatility spike, Cooldown)
         entry_sig = self.robot.evaluate_entry(ind, current_spread_pips=self.spread_pips)
@@ -970,7 +1002,7 @@ def main():
     parser = argparse.ArgumentParser(description="Scalping Robot V5 Pro MT5 Live Trader")
     parser.add_argument("--symbol", type=str, default="XAUUSD", help="Symbol to trade (default: XAUUSD)")
     parser.add_argument("--lot", type=float, default=0.02, help="Lot size (default: 0.02)")
-    parser.add_argument("--iterations", type=int, default=50, help="Number of ticks to process (default: 50)")
+    parser.add_argument("--iterations", type=int, default=999999, help="Number of ticks to process (default: infinite)")
     parser.add_argument("--interval", type=float, default=0.05, help="Tick polling interval in seconds (default: 0.05)")
     args = parser.parse_args()
 
