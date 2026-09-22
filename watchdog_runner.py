@@ -77,8 +77,8 @@ def start_trader():
         err_f = open(TRADER_ERR, 'a', encoding='utf-8')
         proc  = subprocess.Popen(
             [sys.executable, '-m', 'python_engine.mt5_live_trader',
-             '--symbol', 'XAUUSD', '--lot', '0.01',
-             '--iterations', '999999', '--interval', '1.0'],
+             '--symbol', 'XAUUSD', '--lot', '0.02',
+             '--iterations', '999999', '--interval', '0.5'],
             cwd=str(BASE), stdout=out_f, stderr=err_f
         )
         log('Trader started PID={}'.format(proc.pid))

@@ -969,7 +969,7 @@ class MT5LiveTrader:
 def main():
     parser = argparse.ArgumentParser(description="Scalping Robot V5 Pro MT5 Live Trader")
     parser.add_argument("--symbol", type=str, default="XAUUSD", help="Symbol to trade (default: XAUUSD)")
-    parser.add_argument("--lot", type=float, default=0.01, help="Lot size (default: 0.01)")
+    parser.add_argument("--lot", type=float, default=0.02, help="Lot size (default: 0.02)")
     parser.add_argument("--iterations", type=int, default=50, help="Number of ticks to process (default: 50)")
     parser.add_argument("--interval", type=float, default=0.05, help="Tick polling interval in seconds (default: 0.05)")
     args = parser.parse_args()
