@@ -86,18 +86,71 @@ class EconomicNewsFilter:
 
     def _load_default_calendar(self):
         """
-        Populate institutional benchmark high-impact events for gold and major FX.
+        Populate rolling high-impact economic events for Gold/USD.
+        Events are computed relative to now() so the calendar never expires.
+        NFP: 1st Friday each month at 12:30 UTC
+        CPI: ~2nd week each month at 12:30 UTC (estimated as 2nd Tuesday)
+        FOMC: ~6 weeks cycle — next 6 meetings estimated from now
         """
-        benchmarks = [
-            ("2026-09-04 12:30:00", "US Non-Farm Payrolls (NFP) & Unemployment Rate", "USD", "HIGH"),
-            ("2026-09-11 12:30:00", "US Consumer Price Index (CPI) YoY/MoM", "USD", "HIGH"),
-            ("2026-09-16 18:00:00", "FOMC Interest Rate Decision & Fed Economic Projections", "USD", "HIGH"),
-            ("2026-09-16 18:30:00", "FOMC Press Conference - Fed Chair Powell", "USD", "HIGH"),
-            ("2026-10-02 12:30:00", "US Non-Farm Payrolls (NFP)", "USD", "HIGH"),
-            ("2026-10-14 12:30:00", "US Consumer Price Index (CPI)", "USD", "HIGH"),
-            ("2026-11-05 19:00:00", "FOMC Interest Rate Decision", "USD", "HIGH"),
-        ]
-        for t_str, ev, curr, imp in benchmarks:
+        from datetime import timedelta
+        import calendar as cal
+
+        now = datetime.utcnow()
+        events_added = []
+
+        def first_friday(year, month):
+            """Return datetime of first Friday in given month."""
+            for day in range(1, 8):
+                d = datetime(year, month, day, 12, 30, 0)
+                if d.weekday() == 4:  # Friday
+                    return d
+            return datetime(year, month, 7, 12, 30, 0)
+
+        def second_tuesday(year, month):
+            """Return datetime of second Tuesday (≈CPI release)."""
+            count = 0
+            for day in range(1, 15):
+                d = datetime(year, month, day, 12, 30, 0)
+                if d.weekday() == 1:  # Tuesday
+                    count += 1
+                    if count == 2:
+                        return d
+            return datetime(year, month, 14, 12, 30, 0)
+
+        # Generate NFP and CPI for next 3 months
+        for offset in range(0, 4):
+            year = now.year
+            month = now.month + offset
+            if month > 12:
+                month -= 12
+                year += 1
+
+            nfp_dt = first_friday(year, month)
+            if nfp_dt > now:
+                events_added.append((nfp_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                                     f"US Non-Farm Payrolls (NFP) & Unemployment Rate",
+                                     "USD", "HIGH"))
+
+            cpi_dt = second_tuesday(year, month)
+            if cpi_dt > now:
+                events_added.append((cpi_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                                     f"US Consumer Price Index (CPI) YoY/MoM",
+                                     "USD", "HIGH"))
+
+        # FOMC meetings: approximately every 6-7 weeks — estimate next 4
+        # Starting from a known FOMC base date and projecting forward
+        fomc_interval_days = 45  # approx 6.5 weeks
+        fomc_base = datetime(now.year, now.month, 1, 19, 0, 0)
+        for i in range(6):
+            candidate = fomc_base + timedelta(days=i * fomc_interval_days)
+            if candidate > now:
+                events_added.append((candidate.strftime("%Y-%m-%d %H:%M:%S"),
+                                     "FOMC Interest Rate Decision & Press Conference",
+                                     "USD", "HIGH"))
+                if len([e for e in events_added if "FOMC" in e[1]]) >= 3:
+                    break
+
+        for t_str, ev, curr, imp in events_added:
             self.add_event(t_str, ev, curr, imp)
 
     def is_blackout(
@@ -153,7 +206,7 @@ class ScalpingRobotV5:
             "max_spread_pips": 3.5,
             "max_orders": 1,
             "lot_size": 0.01,
-            "pip_value": 10.0,                # $10 per lot for 1 pip on EURUSD / 0.1 on Gold
+            "pip_value": 1.0,                 # XAUUSD: $1 per pip per 0.01 lot (NOT $10 which is EURUSD)
             "pip_size": 0.1 if "XAU" in (config or {}).get("symbol", "XAUUSD") else 0.0001,
             
             # Volatility Shield & Risk Guards
