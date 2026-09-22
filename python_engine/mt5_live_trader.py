@@ -252,23 +252,26 @@ class MT5LiveTrader:
     _yahoo_cache_ts: float = 0.0
     _YAHOO_TTL: float = 5.0  # seconds between API calls (avoid rate limit)
 
-    def _fetch_yahoo_price(self) -> Optional[float]:
+    @classmethod
+    def _fetch_yahoo_price(cls) -> Optional[float]:
         """
         Fetch real-time XAUUSD=X price from Yahoo Finance v7 Quote API.
         Cached for 5s to prevent flooding. Returns None on any network error.
+        Declared as @classmethod so it can be called as MT5LiveTrader._fetch_yahoo_price()
+        at __init__ time before 'self' is fully constructed.
         """
         now = time.time()
-        if now - self._yahoo_cache_ts < self._YAHOO_TTL and self._yahoo_cache > 0:
-            return self._yahoo_cache
+        if now - cls._yahoo_cache_ts < cls._YAHOO_TTL and cls._yahoo_cache > 0:
+            return cls._yahoo_cache
         try:
             url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=XAUUSD%3DX&fields=regularMarketPrice"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode())
                 price = data["quoteResponse"]["result"][0]["regularMarketPrice"]
-                self._yahoo_cache = float(price)
-                self._yahoo_cache_ts = now
-                return self._yahoo_cache
+                cls._yahoo_cache = float(price)
+                cls._yahoo_cache_ts = now
+                return cls._yahoo_cache
         except Exception:
             return None  # silent fallback to random walk
 
@@ -388,13 +391,14 @@ class MT5LiveTrader:
         if self.spread_pips <= 0:
             return False, "INVALID_SPREAD"
 
-        # Check hard maximum threshold
+        # Check hard maximum threshold — two-tier: soft limit (config) then hard ceiling
         max_allowed = float(self.config.get("max_spread_pips", 2.5))
         hard_max = float(self.config.get("hard_max_spread_pips", 3.5))
-        effective_max = max(max_allowed, hard_max)
 
-        if self.spread_pips > effective_max:
-            return False, f"HARD_SPREAD_EXCEEDED ({self.spread_pips:.1f} > {effective_max:.1f} pips)"
+        if self.spread_pips > hard_max:
+            return False, f"HARD_SPREAD_EXCEEDED ({self.spread_pips:.1f} > {hard_max:.1f} pips)"
+        if self.spread_pips > max_allowed:
+            return False, f"SPREAD_EXCEEDED ({self.spread_pips:.1f} > {max_allowed:.1f} pips)"
 
         # Liquidity shock / news spread blowout guard
         spike_ratio = float(self.config.get("spread_spike_ratio", 1.5))
@@ -454,6 +458,17 @@ class MT5LiveTrader:
             pip_size = self.pip_size
             lot_size = max(0.001, float(self.config.get("lot_size", 0.01)))
 
+            # ─── DAILY RESET: Reset daily P&L at UTC midnight ────────────────────────
+            today_utc = datetime.utcnow().date()
+            if not hasattr(self, "_last_daily_reset") or self._last_daily_reset != today_utc:
+                if hasattr(self, "_last_daily_reset"):
+                    print(f"[📅 DAILY RESET] New UTC day {today_utc} — resetting daily P&L. Yesterday: ${self.daily_pnl:+,.2f}")
+                self._last_daily_reset = today_utc
+                self.daily_pnl = 0.0
+                # Auto-recover circuit breaker at day start if balance is OK
+                if self.balance >= float(self.config.get("min_balance_usd", 9700.0)):
+                    self._circuit_breaker_fired = False
+
             # ⚡ CIRCUIT BREAKER: Emergency halt on catastrophic drawdown
             max_daily_loss = float(self.config.get("max_daily_loss_usd", 150.0))
             min_balance = float(self.config.get("min_balance_usd", 9700.0))
@@ -464,6 +479,10 @@ class MT5LiveTrader:
                     logger.critical(f"[CIRCUIT BREAKER] Halt triggered. Daily loss ${self.daily_pnl:.2f} | Balance ${self.balance:.2f}")
                 self._save_state()
                 return
+            elif getattr(self, "_circuit_breaker_fired", False):
+                # Auto-recover: balance and daily_pnl back in safe zone
+                self._circuit_breaker_fired = False
+                print(f"[✅ CIRCUIT BREAKER RESET] Balance ${self.balance:,.2f} recovered — trading RESUMED")
 
             # 1. Manage open positions (SL/TP, Trailing Stop, Breakeven Lock)
             with self._lock:
@@ -482,14 +501,15 @@ class MT5LiveTrader:
                                 pos["sl"] = round(new_sl, self.digits)
                                 pos["breakeven_active"] = True
 
+                        pos_lot = float(pos.get("lot_size", lot_size))
                         if price >= pos["tp"]:
                             closed = True
                             # XAUUSD: $1 per pip per 0.01 lot → pip_value = lot_size * 100 / pip_size_factor
-                            pnl = round(((pos["tp"] - pos["entry"]) / pip_size) * lot_size * 100.0, 2)
+                            pnl = round(((pos["tp"] - pos["entry"]) / pip_size) * pos_lot * 100.0, 2)
                             pos["close_reason"] = "TP_HIT"
                         elif price <= pos["sl"]:
                             closed = True
-                            pnl = round(((pos["sl"] - pos["entry"]) / pip_size) * lot_size * 100.0, 2)
+                            pnl = round(((pos["sl"] - pos["entry"]) / pip_size) * pos_lot * 100.0, 2)
                             pos["close_reason"] = "SL_HIT"
 
                     elif pos_type == ScalpingSignal.SELL:
@@ -501,13 +521,14 @@ class MT5LiveTrader:
                                 pos["sl"] = round(new_sl, self.digits)
                                 pos["breakeven_active"] = True
 
+                        pos_lot = float(pos.get("lot_size", lot_size))
                         if price <= pos["tp"]:
                             closed = True
-                            pnl = round(((pos["entry"] - pos["tp"]) / pip_size) * lot_size * 100.0, 2)
+                            pnl = round(((pos["entry"] - pos["tp"]) / pip_size) * pos_lot * 100.0, 2)
                             pos["close_reason"] = "TP_HIT"
                         elif price >= pos["sl"]:
                             closed = True
-                            pnl = round(((pos["entry"] - pos["sl"]) / pip_size) * lot_size * 100.0, 2)
+                            pnl = round(((pos["entry"] - pos["sl"]) / pip_size) * pos_lot * 100.0, 2)
                             pos["close_reason"] = "SL_HIT"
 
                     if closed:
@@ -618,7 +639,7 @@ class MT5LiveTrader:
                             "id": pos_id,
                             "symbol": self.config["symbol"],
                             "type": signal,
-                            "lots": lot_size,
+                            "lot_size": lot_size,
                             "entry": price,
                             "sl": sl,
                             "tp": tp,
@@ -806,7 +827,7 @@ class MT5LiveTrader:
                 "ticket": ticket,
                 "symbol": symbol,
                 "type": order_type,
-                "lots": lots,
+                "lot_size": lots,
                 "entry": fill_price,
                 "requested_price": order_price,
                 "sl": sl,
@@ -911,7 +932,8 @@ class MT5LiveTrader:
         try:
             with self._lock:
                 total_trades = len(self.trades_history)
-                winning_trades = len([t for t in self.trades_history if t.get("pnl", 0) > 0])
+                # N13: Count breakeven (pnl==0) as a win — not a loss
+                winning_trades = len([t for t in self.trades_history if t.get("pnl", 0) >= 0])
                 win_rate = round((winning_trades / total_trades) * 100.0, 1) if total_trades > 0 else 0.0
                 open_pos_snapshot = list(self.open_positions)
                 balance_val = round(self.balance, 2)
@@ -932,6 +954,7 @@ class MT5LiveTrader:
                 "margin_free": equity_val,
                 "daily_pnl": daily_pnl_val,
                 "open_positions": open_pos_snapshot,
+                "open_positions_count": len(open_pos_snapshot),  # N8: explicit count field
                 "total_trades": total_trades,
                 "win_rate_pct": win_rate,
                 "last_signal": self.last_signal,

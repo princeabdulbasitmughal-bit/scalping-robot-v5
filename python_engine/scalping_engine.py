@@ -117,24 +117,22 @@ class EconomicNewsFilter:
                         return d
             return datetime(year, month, 14, 12, 30, 0)
 
-        # Generate NFP and CPI for next 3 months
-        for offset in range(0, 4):
-            year = now.year
-            month = now.month + offset
-            if month > 12:
-                month -= 12
-                year += 1
+        # Generate NFP and CPI for next 4 months (robust month overflow with divmod)
+        for offset in range(0, 5):
+            raw_month = now.month - 1 + offset  # 0-indexed
+            year = now.year + raw_month // 12
+            month = (raw_month % 12) + 1  # back to 1-indexed
 
             nfp_dt = first_friday(year, month)
             if nfp_dt > now:
                 events_added.append((nfp_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                                     f"US Non-Farm Payrolls (NFP) & Unemployment Rate",
+                                     "US Non-Farm Payrolls (NFP) & Unemployment Rate",
                                      "USD", "HIGH"))
 
             cpi_dt = second_tuesday(year, month)
             if cpi_dt > now:
                 events_added.append((cpi_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                                     f"US Consumer Price Index (CPI) YoY/MoM",
+                                     "US Consumer Price Index (CPI) YoY/MoM",
                                      "USD", "HIGH"))
 
         # FOMC meetings: approximately every 6-7 weeks — estimate next 4
@@ -342,20 +340,24 @@ class ScalpingRobotV5:
         return ema
 
     def _calc_rsi(self, series: List[float], period: int) -> float:
+        """
+        Wilder's Smoothed RSI — uses full series with recursive exponential smoothing.
+        The old 'simple average' RSI was inaccurate; this is the industry-standard version.
+        Requires at least period+1 bars; returns 50.0 (neutral) if insufficient data.
+        """
         if not series or period <= 0 or len(series) < period + 1:
             return 50.0
-        gains = []
-        losses = []
-        for i in range(1, period + 1):
-            diff = series[-period - 1 + i] - series[-period - 1 + i - 1]
-            if diff >= 0:
-                gains.append(diff)
-                losses.append(0.0)
-            else:
-                gains.append(0.0)
-                losses.append(abs(diff))
-        avg_gain = sum(gains) / period
-        avg_loss = sum(losses) / period
+        deltas = [series[i] - series[i - 1] for i in range(1, len(series))]
+        gains = [max(0.0, d) for d in deltas]
+        losses = [abs(min(0.0, d)) for d in deltas]
+        # Wilder's first average (SMA of first `period` values)
+        avg_gain = sum(gains[:period]) / period
+        avg_loss = sum(losses[:period]) / period
+        # Wilder's recursive smoothing over remaining bars
+        for i in range(period, len(gains)):
+            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        # Edge cases
         if avg_loss == 0.0 and avg_gain == 0.0:
             return 50.0
         if avg_loss == 0.0:
@@ -363,8 +365,6 @@ class ScalpingRobotV5:
         if avg_gain == 0.0:
             return 0.0
         rs = avg_gain / avg_loss
-        if 1.0 + rs == 0:
-            return 50.0
         return 100.0 - (100.0 / (1.0 + rs))
 
     def _calc_atr(
