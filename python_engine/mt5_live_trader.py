@@ -58,12 +58,16 @@ class MT5LiveTrader:
         self.config = {
             "symbol": "XAUUSD",
             "timeframe": "M1",
-            "lot_size": 0.02,           # Upgraded 0.01→0.02 at 83.5% WR (doubles profit rate)
+            "lot_size": 0.02,           # Base lot size (minimum floor before dynamic formula)
+            "max_lot_size": 0.05,       # Hard cap: dynamic lot formula never exceeds this
+            "risk_per_trade_pct": 2.0,  # Max % of balance risked per trade (2% rule)
             "max_orders": 2,           # Upgraded 1→2 concurrent positions (safe at 77.8% WR)
-            "tp_pips": 30.0,            # Improved TP 25→30 pip (better RR at high win rate)
-            "sl_pips": 40.0,            # Tightened SL 45→40 pip (0.75 RR ratio vs old 0.55)
-            "trailing_stop_pips": 18.0, # Wider trail 15→18 pip (locks more on strong moves)
-            "breakeven_pips": 12.0,     # Adjusted breakeven to match new TP/SL profile
+            # ── R:R Configuration (FIXED: was 55 SL / 30 TP = 0.54 negative R:R) ──
+            "sl_pips": 30.0,            # Tightened SL 55→30 pip (XAUUSD momentum rarely needs 55 pip room)
+            "rr_ratio": 1.5,            # Industry-standard 1.5:1 reward-to-risk ratio
+            "tp_pips": 45.0,            # TP dynamically = sl_pips * rr_ratio = 30 * 1.5 = 45 pips
+            "trailing_stop_pips": 15.0, # Trail 15 pip — aligns with new tighter SL profile
+            "breakeven_pips": 15.0,     # Move SL to breakeven after 15 pips in favour (50% of TP)
             # Spread Filter Review:
             # 2.5 pips base threshold on Gold (3.5 pips max hard ceiling).
             "max_spread_pips": 2.5,
@@ -81,7 +85,10 @@ class MT5LiveTrader:
             "bar_timeframe_sec": 60.0,
             "account_sync_interval_sec": 2.0,# Throttled account polling interval to eliminate redundant IPC
             "order_timeout_sec": 3.0,         # In-flight order timeout guard
-            "max_trades_per_hour": 30         # Rate limiter: max 30 trades/hour (sliding window)
+            "max_trades_per_hour": 30,        # Rate limiter: max 30 trades/hour (sliding window)
+            "max_daily_loss_usd": 200.0,      # Circuit breaker threshold — raised 150→200 (2% of 10k)
+            "min_balance_usd": 9700.0,        # Hard floor below which trading halts
+            "entry_cooldown_sec": 30.0        # Min seconds between new entries (prevents over-trading after SL)
         }
         if config:
             self.config.update(config)
@@ -100,6 +107,13 @@ class MT5LiveTrader:
         self.spread_pips = 1.6
         self.last_signal = "HOLD"
         self.filling_mode = None
+
+        # ── Circuit Breaker & Risk Tracking ──────────────────────────────────
+        self.consecutive_losses: int = 0          # reset on any win
+        self.daily_wins: int = 0                  # wins today
+        self.daily_losses: int = 0                # losses today
+        self._cb_pause_until: float = 0.0         # epoch; trading blocked until this time
+        self._min_balance_halted: bool = False     # permanent halt when balance < min_balance_usd
 
         # Symbol metadata cache (eliminates repeated IPC queries)
         self.point = 0.01 if "XAU" in self.config["symbol"] else 0.00001
@@ -456,33 +470,121 @@ class MT5LiveTrader:
             self.update_candles(price)
 
             pip_size = self.pip_size
-            lot_size = max(0.001, float(self.config.get("lot_size", 0.01)))
+            lot_size = self._get_dynamic_lot(self.balance)
 
-            # ─── DAILY RESET: Reset daily P&L at UTC midnight ────────────────────────
-            today_utc = datetime.utcnow().date()
+            # ─── DAILY RESET at exactly 00:00 UTC ────────────────────────────────────
+            now_utc = datetime.utcnow()
+            today_utc = now_utc.date()
             if not hasattr(self, "_last_daily_reset") or self._last_daily_reset != today_utc:
                 if hasattr(self, "_last_daily_reset"):
-                    print(f"[📅 DAILY RESET] New UTC day {today_utc} — resetting daily P&L. Yesterday: ${self.daily_pnl:+,.2f}")
+                    # ── Log daily win-rate before zeroing counters ──
+                    total_day = self.daily_wins + self.daily_losses
+                    daily_win_rate = (self.daily_wins / total_day * 100.0) if total_day > 0 else 0.0
+                    eod_msg = (
+                        f"[EOD SUMMARY] Date={self._last_daily_reset} | "
+                        f"PnL=${self.daily_pnl:+,.2f} | "
+                        f"Wins={self.daily_wins} Losses={self.daily_losses} "
+                        f"WinRate={daily_win_rate:.1f}%"
+                    )
+                    logger.info(eod_msg)
+                    sys.stdout.write(eod_msg + "\n")
+                    sys.stdout.flush()
+
+                # ── Zero ALL daily vars at midnight UTC ──
                 self._last_daily_reset = today_utc
                 self.daily_pnl = 0.0
-                # Auto-recover circuit breaker at day start if balance is OK
-                if self.balance >= float(self.config.get("min_balance_usd", 9700.0)):
-                    self._circuit_breaker_fired = False
+                self.daily_wins = 0
+                self.daily_losses = 0
+                self.consecutive_losses = 0
+                self._cb_pause_until = 0.0
 
-            # ⚡ CIRCUIT BREAKER: Emergency halt on catastrophic drawdown
-            max_daily_loss = float(self.config.get("max_daily_loss_usd", 150.0))
-            min_balance = float(self.config.get("min_balance_usd", 9700.0))
-            if self.daily_pnl < -max_daily_loss or self.balance < min_balance:
-                if not getattr(self, "_circuit_breaker_fired", False):
-                    self._circuit_breaker_fired = True
-                    print(f"[⚡ CIRCUIT BREAKER] Trading HALTED — Daily P&L: ${self.daily_pnl:+,.2f} | Balance: ${self.balance:,.2f}")
-                    logger.critical(f"[CIRCUIT BREAKER] Halt triggered. Daily loss ${self.daily_pnl:.2f} | Balance ${self.balance:.2f}")
+                reset_msg = f"[DAILY RESET] UTC midnight crossed → {today_utc}. All daily P&L/counters zeroed."
+                logger.info(reset_msg)
+                sys.stdout.write(reset_msg + "\n")
+                sys.stdout.flush()
+
+                # Auto-recover daily circuit breaker only if balance is safe
+                min_bal_cfg = float(self.config.get("min_balance_usd", 9700.0))
+                if self.balance >= min_bal_cfg:
+                    self._circuit_breaker_fired = False
+                    logger.info(f"[DAILY RESET] Circuit breaker cleared. Balance=${self.balance:,.2f}")
+
+            # ── Read all thresholds from config (never hardcoded) ─────────────────────
+            max_daily_loss = float(self.config.get("max_daily_loss_usd", 200.0))
+            min_balance    = float(self.config.get("min_balance_usd", 9700.0))
+            now_epoch      = time.time()
+
+            # ── PERMANENT HALT: balance below absolute floor ───────────────────────────
+            if self.balance < min_balance:
+                if not self._min_balance_halted:
+                    self._min_balance_halted = True
+                    halt_msg = (
+                        f"[PERMANENT HALT] Balance ${self.balance:,.2f} is below "
+                        f"min_balance_usd ${min_balance:,.2f}. "
+                        f"ALL TRADING STOPPED PERMANENTLY. Manual intervention required."
+                    )
+                    logger.critical(halt_msg)
+                    sys.stdout.write(halt_msg + "\n")
+                    sys.stdout.flush()
                 self._save_state()
                 return
-            elif getattr(self, "_circuit_breaker_fired", False):
-                # Auto-recover: balance and daily_pnl back in safe zone
-                self._circuit_breaker_fired = False
-                print(f"[✅ CIRCUIT BREAKER RESET] Balance ${self.balance:,.2f} recovered — trading RESUMED")
+
+            # ── DAILY LOSS CIRCUIT BREAKER: 1-hour timed pause ───────────────────────
+            if self.daily_pnl < -max_daily_loss:
+                if not getattr(self, "_circuit_breaker_fired", False):
+                    self._circuit_breaker_fired = True
+                    resume_at = now_epoch + 3600.0          # exactly 1 hour
+                    self._cb_pause_until = resume_at
+                    resume_str = datetime.utcfromtimestamp(resume_at).strftime("%Y-%m-%d %H:%M:%S UTC")
+                    cb_msg = (
+                        f"CIRCUIT BREAKER ACTIVATED — Daily loss limit hit. "
+                        f"Daily P&L: ${self.daily_pnl:+,.2f} | Threshold: -${max_daily_loss:,.2f} | "
+                        f"Balance: ${self.balance:,.2f} | "
+                        f"Pausing for exactly 1 hour. Will resume at {resume_str}."
+                    )
+                    logger.critical(f"[{cb_msg}]")
+                    sys.stdout.write(f"[CIRCUIT BREAKER] {cb_msg}\n")
+                    sys.stdout.flush()
+
+                if now_epoch < self._cb_pause_until:
+                    remaining = int(self._cb_pause_until - now_epoch)
+                    logger.debug(f"[CIRCUIT BREAKER] Still paused — {remaining}s remaining.")
+                    self._save_state()
+                    return
+                else:
+                    # 1-hour pause expired — auto-recover and log
+                    self._circuit_breaker_fired = False
+                    self._cb_pause_until = 0.0
+                    recover_msg = (
+                        f"[CIRCUIT BREAKER CLEARED] 1-hour pause expired. "
+                        f"Daily P&L: ${self.daily_pnl:+,.2f} | Balance: ${self.balance:,.2f} — trading RESUMED."
+                    )
+                    logger.info(recover_msg)
+                    sys.stdout.write(recover_msg + "\n")
+                    sys.stdout.flush()
+
+            # ── CONSECUTIVE LOSS COOLDOWN: 3 losses in a row → 30-minute pause ────────
+            if self.consecutive_losses >= 3:
+                if now_epoch < self._cb_pause_until:
+                    remaining = int(self._cb_pause_until - now_epoch)
+                    if remaining % 60 == 0:   # log once per minute to avoid spam
+                        logger.warning(
+                            f"[CONSEC-LOSS COOLDOWN] {self.consecutive_losses} consecutive losses — "
+                            f"cooldown active, {remaining}s remaining."
+                        )
+                    self._save_state()
+                    return
+                elif self._cb_pause_until > 0.0:
+                    # Cooldown just expired
+                    self.consecutive_losses = 0
+                    self._cb_pause_until = 0.0
+                    resume_msg = (
+                        f"[CONSEC-LOSS COOLDOWN CLEARED] 30-min cooldown expired. "
+                        f"Balance: ${self.balance:,.2f} — trading RESUMED."
+                    )
+                    logger.info(resume_msg)
+                    sys.stdout.write(resume_msg + "\n")
+                    sys.stdout.flush()
 
             # 1. Manage open positions (SL/TP, Trailing Stop, Breakeven Lock)
             with self._lock:
@@ -538,7 +640,10 @@ class MT5LiveTrader:
                         pos["close_price"] = price
                         pos["close_time"] = datetime.utcnow().isoformat() + "Z"
                         self.trades_history.append(pos)
-                        print(f"[TRADE CLOSED] {pos['type']} | Reason: {pos['close_reason']} | PnL: ${pnl:+,.2f} | Balance: ${self.balance:,.2f}")
+                        msg = f"[TRADE CLOSED] {pos['type']} | {pos['close_reason']} | PnL: ${pnl:+,.2f} | Balance: ${self.balance:,.2f}\n"
+                        sys.stdout.write(msg)
+                        sys.stdout.flush()
+                        logger.info(msg.strip())
                     else:
                         remaining_positions.append(pos)
 
@@ -581,6 +686,18 @@ class MT5LiveTrader:
 
 
             if has_capacity:
+                # [COOLDOWN GUARD] Min 30s between entries — prevents rapid re-entry after SL hits
+                cooldown_sec = float(self.config.get("entry_cooldown_sec", 30.0))
+                last_trade_ts = getattr(self, "_last_trade_time", 0.0)
+                if (now_ts - last_trade_ts) < cooldown_sec:
+                    self._save_state()
+                    return
+
+                # ⏰ SESSION FILTER: Tokyo (00:00-09:00 UTC), London (07:00-16:00 UTC), NY (13:00-22:00 UTC)
+                if not self._in_trading_session():
+                    self._save_state()
+                    return
+
                 t_sig_start = time.perf_counter_ns()
                 signal = self._get_signal(indicators)
                 self.last_signal = signal
@@ -598,9 +715,12 @@ class MT5LiveTrader:
                     # Compute dynamic slippage deviation
                     dynamic_deviation = self.calculate_dynamic_slippage(indicators)
 
-                    # Calculate target SL and TP
-                    tp = round(price + (self.config["tp_pips"] * pip_size) if signal == ScalpingSignal.BUY else price - (self.config["tp_pips"] * pip_size), self.digits)
-                    sl = round(price - (self.config["sl_pips"] * pip_size) if signal == ScalpingSignal.BUY else price + (self.config["sl_pips"] * pip_size), self.digits)
+                    # Calculate target SL and TP — TP is derived dynamically from sl_pips * rr_ratio
+                    # so editing either "sl_pips" or "rr_ratio" in config adjusts both automatically.
+                    sl_pips = float(self.config["sl_pips"])
+                    tp_pips = sl_pips * float(self.config.get("rr_ratio", 1.5))  # dynamic: 30 * 1.5 = 45 pips
+                    sl = round(price - (sl_pips * pip_size) if signal == ScalpingSignal.BUY else price + (sl_pips * pip_size), self.digits)
+                    tp = round(price + (tp_pips * pip_size) if signal == ScalpingSignal.BUY else price - (tp_pips * pip_size), self.digits)
 
                     pos_id = f"trade-{int(time.time() * 1000)}"
                     t_dispatch_start = time.perf_counter_ns()
@@ -609,8 +729,9 @@ class MT5LiveTrader:
                         self._order_in_flight = True
                         self._order_in_flight_time = time.time()
 
-                    # Record trade for rate limiter
+                    # Record trade for rate limiter and cooldown guard
                     self._trade_timestamps.append(time.time())
+                    self._last_trade_time = time.time()
 
                     # Instant non-blocking order dispatch
                     order_task = {
@@ -650,7 +771,10 @@ class MT5LiveTrader:
                         with self._lock:
                             self.open_positions.append(sim_pos)
                             self._order_in_flight = False
-                        print(f"[NEW POSITION OPENED - SIM] {signal} {lot_size} lots @ {price} | SL: {sl} | TP: {tp} | Dev: {dynamic_deviation}pts | Spread: {self.spread_pips} pips")
+                        msg = f"[NEW POSITION - SIM] {signal} {lot_size} lots @ {price} | SL: {sl} | TP: {tp} | Dev: {dynamic_deviation}pts | Spread: {self.spread_pips}pips\n"
+                        sys.stdout.write(msg)
+                        sys.stdout.flush()
+                        logger.info(msg.strip())
 
                     t_dispatch_end = time.perf_counter_ns()
                     self.latency_metrics["signal_to_dispatch_us"] = round((t_dispatch_end - t_dispatch_start) / 1000.0, 2)
@@ -669,15 +793,65 @@ class MT5LiveTrader:
             self.latency_metrics["avg_tick_loop_us"] = round(sum(self._loop_latencies) / len(self._loop_latencies), 2)
             self.latency_metrics["ticks_processed"] += 1
 
+    def _in_trading_session(self) -> bool:
+        """Trade during active Forex sessions (UTC hours):
+          - Tokyo  : 00:00-09:00 UTC  (05:00-14:00 PKT / UTC+5)
+          - London : 07:00-16:00 UTC  (12:00-21:00 PKT / UTC+5)
+          - New York: 13:00-22:00 UTC  (18:00-03:00 PKT / UTC+5)
+        Dead zone: 22:00-00:00 UTC only (~2 hrs). Coverage: ~22 hrs/day."""
+        from datetime import timezone
+        now_utc = datetime.now(timezone.utc)
+        hour = now_utc.hour
+        in_tokyo  = 0  <= hour < 9   # Tokyo / Asian session  (00:00-09:00 UTC)
+        in_london = 7  <= hour < 16  # London session         (07:00-16:00 UTC, overlaps Tokyo 07-09)
+        in_ny     = 13 <= hour < 22  # New York session       (13:00-22:00 UTC, overlaps London 13-16)
+        active = in_tokyo or in_london or in_ny
+        if not active:
+            logger.debug(f"[SESSION FILTER] Outside trading sessions. UTC hour={hour}. Dead zone: 22:00-00:00 UTC.")
+        return active
+
+    def _get_dynamic_lot(self, balance: float) -> float:
+        """Auto-scale lot size based on account balance milestones."""
+        if balance >= 10200.0:
+            return 0.04
+        elif balance >= 10150.0:
+            return 0.03
+        else:
+            return max(0.001, float(self.config.get("lot_size", 0.02)))
+
+    def _calculate_macd(self, prices: list, fast: int = 12, slow: int = 26, signal_period: int = 9):
+        """Calculate MACD line, signal line, and histogram (pure Python — no pandas needed)."""
+        if len(prices) < slow + signal_period:
+            return 0.0, 0.0, 0.0
+        def ema(data, period):
+            k = 2.0 / (period + 1)
+            e = data[0]
+            for v in data[1:]:
+                e = v * k + e * (1 - k)
+            return e
+        def ema_series(data, period):
+            k = 2.0 / (period + 1)
+            result = [data[0]]
+            for v in data[1:]:
+                result.append(v * k + result[-1] * (1 - k))
+            return result
+        ema_fast = ema_series(prices, fast)
+        ema_slow = ema_series(prices, slow)
+        macd_line = [f - s for f, s in zip(ema_fast, ema_slow)]
+        signal_line = ema_series(macd_line[slow - 1:], signal_period)
+        hist = macd_line[-1] - signal_line[-1]
+        return macd_line[-1], signal_line[-1], hist
+
     def _get_signal(self, ind: Dict[str, Any]) -> str:
         """
         Institutional quantitative signal confluence:
-        Combines Bollinger Bands boundary tests, Exponential Moving Averages, and RSI momentum.
-        Deterministic, zero coin-flip degradation.
+        Combines Bollinger Bands boundary tests, Exponential Moving Averages, RSI momentum, and MACD.
+        Relaxed thresholds for consistent signal generation across all sessions.
         """
         close = ind.get("close", self.current_price)
         bb_upper = ind.get("bb_upper", close + 5.0)
         bb_lower = ind.get("bb_lower", close - 5.0)
+        bb_mid   = (bb_upper + bb_lower) / 2.0
         fast_ema = ind.get("fast_ema", close)
         slow_ema = ind.get("slow_ema", close)
         rsi = ind.get("rsi", 50.0)
@@ -690,33 +864,72 @@ class MT5LiveTrader:
         if self.robot.shield_status.get("halted", False):
             return ScalpingSignal.HOLD
 
-        # Fix B7: Check engine entry signal FIRST — if it's actionable, use it
-        # (Previously this was dead code after primary BB/EMA rules already returned)
-        if entry_sig in [ScalpingSignal.BUY, ScalpingSignal.SELL]:
-            # Still validate with our confluence filters before acting
-            pass  # Will fall through to primary checks below for double confirmation
+        raw_signal = ScalpingSignal.HOLD
+        tier_hit = None  # for diagnostic logging
 
-        # Primary Buy Setup: Price bounces off lower BB, EMA bullish, RSI not overbought
-        if close <= bb_lower and fast_ema >= slow_ema and rsi < 60.0:
-            return ScalpingSignal.BUY
+        # ── TIER 1: Strong BB mean-reversion (price at band extremes) ──────────
+        if close <= bb_lower and rsi < 55.0:
+            raw_signal = ScalpingSignal.BUY
+            tier_hit = f"T1-BB-BUY  | close={close:.3f} <= bb_lower={bb_lower:.3f}, rsi={rsi:.1f}"
+        elif close >= bb_upper and rsi > 45.0:
+            raw_signal = ScalpingSignal.SELL
+            tier_hit = f"T1-BB-SELL | close={close:.3f} >= bb_upper={bb_upper:.3f}, rsi={rsi:.1f}"
 
-        # Primary Sell Setup: Price rejects upper BB, EMA bearish, RSI not oversold
-        if close >= bb_upper and fast_ema <= slow_ema and rsi > 40.0:
-            return ScalpingSignal.SELL
+        # ── TIER 2: EMA trend + momentum (primary scalp engine) ──────────────
+        # BUG FIX: widened proximity band 0.0003→0.0015 (0.03%→0.15%).
+        # At XAUUSD ~$2400 the old band was only $0.72; new band is $3.60,
+        # which realistically captures pullbacks to fast EMA without over-trading.
+        elif fast_ema > slow_ema and rsi < 65.0 and close < fast_ema * 1.0015:
+            raw_signal = ScalpingSignal.BUY
+            tier_hit = f"T2-EMA-BUY  | fast={fast_ema:.3f} > slow={slow_ema:.3f}, close={close:.3f}, rsi={rsi:.1f}"
+        elif fast_ema < slow_ema and rsi > 35.0 and close > fast_ema * 0.9985:
+            raw_signal = ScalpingSignal.SELL
+            tier_hit = f"T2-EMA-SELL | fast={fast_ema:.3f} < slow={slow_ema:.3f}, close={close:.3f}, rsi={rsi:.1f}"
 
-        # Secondary Trend-Pullback entries (TIGHTENED: RSI thresholds from 52/48 to 45/55)
-        # Only enter on confirmed pullback + real momentum — not neutral RSI zone
-        if fast_ema >= slow_ema and close <= fast_ema and rsi < 45.0:
-            return ScalpingSignal.BUY
+        # ── TIER 3: RSI momentum extremes (override on strong momentum) ───────
+        elif rsi <= 35.0:
+            raw_signal = ScalpingSignal.BUY
+            tier_hit = f"T3-RSI-BUY  | rsi={rsi:.1f} <= 35.0"
+        elif rsi >= 65.0:
+            raw_signal = ScalpingSignal.SELL
+            tier_hit = f"T3-RSI-SELL | rsi={rsi:.1f} >= 65.0"
 
-        if fast_ema < slow_ema and close >= fast_ema and rsi > 55.0:
-            return ScalpingSignal.SELL
+        # ── TIER 4: Price vs midband + EMA agreement (widest catch-all) ───────
+        elif fast_ema >= slow_ema and close < bb_mid and rsi < 58.0:
+            raw_signal = ScalpingSignal.BUY
+            tier_hit = f"T4-MID-BUY  | fast={fast_ema:.3f} >= slow={slow_ema:.3f}, close={close:.3f} < bb_mid={bb_mid:.3f}, rsi={rsi:.1f}"
+        elif fast_ema < slow_ema and close > bb_mid and rsi > 42.0:
+            raw_signal = ScalpingSignal.SELL
+            tier_hit = f"T4-MID-SELL | fast={fast_ema:.3f} < slow={slow_ema:.3f}, close={close:.3f} > bb_mid={bb_mid:.3f}, rsi={rsi:.1f}"
 
-        # Tertiary: engine signal when no primary/secondary confluence (was dead code, now live)
-        if entry_sig in [ScalpingSignal.BUY, ScalpingSignal.SELL]:
-            return entry_sig
+        # ── TIER 5: Robot entry signal fallback ──────────────────────────────
+        elif entry_sig in [ScalpingSignal.BUY, ScalpingSignal.SELL]:
+            raw_signal = entry_sig
+            tier_hit = f"T5-ROBOT-{'BUY' if entry_sig == ScalpingSignal.BUY else 'SELL'} | fallback from ScalpingRobotV5.evaluate_entry"
 
-        return ScalpingSignal.HOLD
+        if raw_signal == ScalpingSignal.HOLD:
+            return ScalpingSignal.HOLD
+
+        # ── MACD CONFLUENCE FILTER (relaxed) ─────────────────────────────────
+        # Block ONLY if MACD histogram strongly opposes the signal (|macd_hist| > 0.5 threshold).
+        # Minor MACD disagreement is permitted — avoids over-filtering at low-volatility periods.
+        close_prices = [b["close"] for b in self.bars[-60:]] if len(self.bars) >= 35 else []
+        if close_prices:
+            _, _, macd_hist = self._calculate_macd(close_prices)
+            if raw_signal == ScalpingSignal.BUY and macd_hist < -0.5:
+                logger.info(f"[SIGNAL SUPPRESSED] {tier_hit} | MACD hist={macd_hist:.4f} < -0.5 — strong bearish divergence")
+                return ScalpingSignal.HOLD   # Strong MACD bearish — suppress buy
+            if raw_signal == ScalpingSignal.SELL and macd_hist > 0.5:
+                logger.info(f"[SIGNAL SUPPRESSED] {tier_hit} | MACD hist={macd_hist:.4f} > +0.5 — strong bullish divergence")
+                return ScalpingSignal.HOLD   # Strong MACD bullish — suppress sell
+            logger.info(f"[SIGNAL FIRED] {tier_hit} | MACD hist={macd_hist:.4f} (within threshold) → {raw_signal}")
+        else:
+            logger.info(f"[SIGNAL FIRED] {tier_hit} | MACD skipped (insufficient bars) → {raw_signal}")
+
+        return raw_signal
+
+
+
 
     def _order_execution_worker(self):
         """
@@ -995,6 +1208,11 @@ class MT5LiveTrader:
         print("=" * 80)
         print("  [SCALPING ROBOT V5 PRO] METATRADER 5 (MT5) LIVE TRADER ACTIVATED")
         print(f"  Symbol: {self.config['symbol']} | Lot Size: {self.config['lot_size']} | Max Orders: {self.config['max_orders']}")
+        _sl = float(self.config['sl_pips'])
+        _rr = float(self.config.get('rr_ratio', 1.5))
+        _tp = _sl * _rr
+        print(f"  R:R Config: SL={_sl:.0f} pips | TP={_tp:.0f} pips (rr_ratio={_rr}) — {_rr:.1f}:1 reward-to-risk")
+        print(f"  Breakeven: after {self.config['breakeven_pips']:.0f} pips | Trail: {self.config['trailing_stop_pips']:.0f} pips")
         print(f"  Dynamic Slippage: [{self.config['min_slippage']}-{self.config['max_slippage']}] pts | Spread Guard: {self.config['max_spread_pips']} pips (Spike ratio: {self.config['spread_spike_ratio']})")
         print(f"  Tick Interval: {self.config['tick_interval_sec']}s | Async Execution: ACTIVE")
         print(f"  Atomic Status Path: {STATUS_FILE}")

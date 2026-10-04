@@ -53,6 +53,13 @@
       border:1px solid var(--border);padding:6px 12px;border-radius:var(--r);text-decoration:none;
       transition:all .2s;white-space:nowrap}
     .hdr-link:hover{color:var(--blue);border-color:var(--blue);background:var(--blue-dim)}
+    /* SESSION INDICATOR */
+    .session-pill{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+      font-weight:700;padding:5px 12px;border-radius:20px;border:1px solid;letter-spacing:.07em;white-space:nowrap;transition:all .4s}
+    .sess-london{color:#3fb950;background:rgba(63,185,80,.13);border-color:rgba(63,185,80,.4)}
+    .sess-ny{color:#58a6ff;background:rgba(88,166,255,.12);border-color:rgba(88,166,255,.4)}
+    .sess-overlap{color:#e3b341;background:rgba(227,179,65,.15);border-color:rgba(227,179,65,.45)}
+    .sess-closed{color:#7d8590;background:rgba(125,133,144,.10);border-color:rgba(125,133,144,.3)}
     /* MAIN */
     main{flex:1;padding:20px;max-width:1440px;margin:0 auto;width:100%}
     .section{margin-bottom:20px}
@@ -180,6 +187,7 @@
     <div class="live-badge"><span class="live-dot"></span>XAUUSD &bull; LIVE</div>
   </div>
   <div class="hdr-right">
+    <div id="session-pill" class="session-pill sess-closed">🔴 CLOSED</div>
     <div class="clock-box">&#x1F552; <span class="val" id="clock">--:--:--</span> &nbsp;<span style="color:var(--border)">|</span>&nbsp; <span id="clock-date" style="color:var(--muted)">---</span></div>
     <a href="/health" target="_blank" class="hdr-link">&#x26A1; /health JSON</a>
   </div>
