@@ -113,6 +113,11 @@ try:
     from wave53_tick_reversal_guard import tick_reversal_guard
     from wave54_max_spread_per_trade import max_spread_per_trade
     from wave55_balance_floor_guard import balance_floor_guard
+    from wave56_consecutive_loss_guard import consecutive_loss_guard
+    from wave57_hourly_pnl_map import hourly_pnl_map
+    from wave58_price_range_filter import price_range_filter
+    from wave59_ma_trend_filter import ma_trend_filter
+    from wave60_profit_streak_booster import profit_streak_booster
     _WAVES_LOADED = True
 except Exception:
     _WAVES_LOADED = False
@@ -160,6 +165,11 @@ except Exception:
     tick_reversal_guard = None
     max_spread_per_trade = None
     balance_floor_guard = None
+    consecutive_loss_guard = None
+    hourly_pnl_map = None
+    price_range_filter = None
+    ma_trend_filter = None
+    profit_streak_booster = None
 
 
 
@@ -1341,6 +1351,27 @@ class MT5LiveTrader:
                         except Exception:
                             pass
 
+                    # Wave 56: Record win/loss for consecutive loss guard
+                    if _WAVES_LOADED and consecutive_loss_guard is not None:
+                        try:
+                            consecutive_loss_guard.record_trade(won=(pnl >= 0))
+                        except Exception:
+                            pass
+
+                    # Wave 57: Record PnL for hourly PnL map
+                    if _WAVES_LOADED and hourly_pnl_map is not None:
+                        try:
+                            hourly_pnl_map.record_trade(pnl)
+                        except Exception:
+                            pass
+
+                    # Wave 60: Record win/loss for profit streak booster
+                    if _WAVES_LOADED and profit_streak_booster is not None:
+                        try:
+                            profit_streak_booster.record_trade(won=(pnl >= 0))
+                        except Exception:
+                            pass
+
                 else:
                     remaining_positions.append(pos)
 
@@ -1469,6 +1500,18 @@ class MT5LiveTrader:
             if _WAVES_LOADED and balance_floor_guard is not None:
                 try:
                     balance_floor_guard.update(self.balance)
+                except Exception:
+                    pass
+            # Wave 58: Feed current price to price range filter
+            if _WAVES_LOADED and price_range_filter is not None:
+                try:
+                    price_range_filter.update(current_price)
+                except Exception:
+                    pass
+            # Wave 59: Feed current price to MA trend filter
+            if _WAVES_LOADED and ma_trend_filter is not None:
+                try:
+                    ma_trend_filter.update(current_price)
                 except Exception:
                     pass
             self.update_candles(price)
@@ -1969,6 +2012,16 @@ class MT5LiveTrader:
                         except Exception:
                             pass
 
+                    # Wave 60: Profit Streak Booster — expand TP during confidence mode
+                    if _WAVES_LOADED and profit_streak_booster is not None:
+                        try:
+                            _tp60_mult = profit_streak_booster.get_tp_multiplier()
+                            if _tp60_mult != 1.0:
+                                tp_pips *= _tp60_mult
+                                logger.info(f"[WAVE60] Confidence mode: TP x{_tp60_mult:.1f} -> {tp_pips:.1f} pips")
+                        except Exception:
+                            pass
+
                     sl = round(price - (sl_pips * pip_size) if signal == ScalpingSignal.BUY else price + (sl_pips * pip_size), self.digits)
                     tp = round(price + (tp_pips * pip_size) if signal == ScalpingSignal.BUY else price - (tp_pips * pip_size), self.digits)
 
@@ -2209,6 +2262,16 @@ class MT5LiveTrader:
             try:
                 actual_lot = lot_recovery_ladder.get_lot(actual_lot)
                 actual_lot = min(actual_lot, max_lot_size)
+            except Exception:
+                pass
+
+        # Wave 57: Hourly PnL Map — reduce lot in historically-losing hours
+        if _WAVES_LOADED and hourly_pnl_map is not None:
+            try:
+                _h57_mult = hourly_pnl_map.get_lot_multiplier()
+                if _h57_mult < 1.0:
+                    actual_lot *= _h57_mult
+                    logger.debug(f"[WAVE57] Hourly lot reduction: x{_h57_mult:.1f} -> {actual_lot:.3f}")
             except Exception:
                 pass
 
@@ -2675,6 +2738,34 @@ class MT5LiveTrader:
                     return ScalpingSignal.HOLD
             except Exception as _bfg55e:
                 logger.debug(f"[BALANCE FLOOR] Error: {_bfg55e}")
+
+        # ── Wave 56: Consecutive Loss Guard (revenge-trade spiral prevention) ────────
+        if _WAVES_LOADED and consecutive_loss_guard is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if consecutive_loss_guard.is_entry_blocked():
+                    logger.info("[CONSEC LOSS] Blocked: consecutive loss cool-down active")
+                    return ScalpingSignal.HOLD
+            except Exception as _clg56e:
+                logger.debug(f"[CONSEC LOSS] Error: {_clg56e}")
+
+        # ── Wave 58: Price Range Filter (flat/dead market detection) ──────────────────
+        if _WAVES_LOADED and price_range_filter is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if price_range_filter.is_entry_blocked():
+                    logger.info(f"[RANGE FILTER] Blocked: daily range {price_range_filter.get_range_pips():.2f} pips — market too flat")
+                    return ScalpingSignal.HOLD
+            except Exception as _prf58e:
+                logger.debug(f"[RANGE FILTER] Error: {_prf58e}")
+
+        # ── Wave 59: MA Trend Filter (EMA-50 trend alignment) ─────────────────────────
+        if _WAVES_LOADED and ma_trend_filter is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                _sig_str59 = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
+                if ma_trend_filter.is_signal_blocked(_sig_str59):
+                    logger.info(f"[MA TREND] Blocked: {_sig_str59} against EMA50 trend")
+                    return ScalpingSignal.HOLD
+            except Exception as _mat59e:
+                logger.debug(f"[MA TREND] Error: {_mat59e}")
 
         # ── Wave 26: Time Filter (scheduled release window) ───────────────────
         if _WAVES_LOADED and wave26_time_filter is not None and raw_signal != ScalpingSignal.HOLD:
@@ -3405,6 +3496,41 @@ class MT5LiveTrader:
             if _WAVES_LOADED and balance_floor_guard is not None:
                 try:
                     state["balance_floor_guard"] = balance_floor_guard.info()
+                except Exception:
+                    pass
+
+            # Wave 56: Inject consecutive loss guard status
+            if _WAVES_LOADED and consecutive_loss_guard is not None:
+                try:
+                    state["consecutive_loss_guard"] = consecutive_loss_guard.info()
+                except Exception:
+                    pass
+
+            # Wave 57: Inject hourly PnL map status
+            if _WAVES_LOADED and hourly_pnl_map is not None:
+                try:
+                    state["hourly_pnl_map"] = hourly_pnl_map.info()
+                except Exception:
+                    pass
+
+            # Wave 58: Inject price range filter status
+            if _WAVES_LOADED and price_range_filter is not None:
+                try:
+                    state["price_range_filter"] = price_range_filter.info()
+                except Exception:
+                    pass
+
+            # Wave 59: Inject MA trend filter status
+            if _WAVES_LOADED and ma_trend_filter is not None:
+                try:
+                    state["ma_trend_filter"] = ma_trend_filter.info()
+                except Exception:
+                    pass
+
+            # Wave 60: Inject profit streak booster status
+            if _WAVES_LOADED and profit_streak_booster is not None:
+                try:
+                    state["profit_streak_booster"] = profit_streak_booster.info()
                 except Exception:
                     pass
 
