@@ -49,18 +49,33 @@ if (-not $apiOk) {
     } catch {}
 }
 
-# ── Heal Trader if stale or missing ───────────────────────
+# ── Auto-restart / Heal Trader if stale, missing, or trader_status != 'ACTIVE_SCALPING' ──
 $healedTrader = $false
 $statusFile   = "$base\live_status.json"
 $needHeal     = $false
+
+$traderStatus = $null
+if ($health -and $health.trader_status) {
+    $traderStatus = $health.trader_status
+} elseif (Test-Path $statusFile) {
+    try {
+        $statusObj = Get-Content $statusFile -Raw | ConvertFrom-Json
+        $traderStatus = $statusObj.status
+    } catch {}
+}
 
 if (-not (Test-Path $statusFile)) {
     $needHeal = $true
 } else {
     try {
         $age = ((Get-Date) - (Get-Item $statusFile).LastWriteTime).TotalSeconds
-        if ($age -gt 90) { $needHeal = $true }   # 90s stale threshold (was 120 — more responsive)
+        if ($age -gt 90) { $needHeal = $true }   # 90s stale threshold
     } catch { $needHeal = $true }
+}
+
+# Auto-restart logic: if trader_status is NOT 'ACTIVE_SCALPING', restart trader
+if ($traderStatus -ne 'ACTIVE_SCALPING') {
+    $needHeal = $true
 }
 
 if ($needHeal) {
@@ -71,13 +86,9 @@ if ($needHeal) {
 
     Start-Sleep 1
 
-    # Launch trader — use APPEND mode for logs (>> not >)
-    $traderArgs = '-m','python_engine.mt5_live_trader','--symbol','XAUUSD','--lot','0.02','--iterations','999999','--interval','0.5'
-    Start-Process -FilePath $py `
-        -ArgumentList $traderArgs `
-        -WorkingDirectory $base `
-        -RedirectStandardError "$base\trader_err.log" `
-        -WindowStyle Hidden
+    # Restart trader
+    $py = 'C:\Users\absh5\AppData\Local\Programs\Python\Python311\python.exe'
+    Start-Process -FilePath $py -ArgumentList '-m','python_engine.mt5_live_trader','--symbol','XAUUSD','--lot','0.02','--iterations','999999','--interval','0.5' -WorkingDirectory 'E:\scalping-robot-v5' -WindowStyle Hidden
     $healedTrader = $true
     Start-Sleep 5
 }
@@ -103,9 +114,176 @@ if ($healedApi -or $healedTrader) {
     } catch {}
 }
 
+# If trader_status is still not ACTIVE_SCALPING after re-fetch, restart trader
+if ($health -and ($health.trader_status -ne 'ACTIVE_SCALPING') -and (-not $healedTrader)) {
+    $py = 'C:\Users\absh5\AppData\Local\Programs\Python\Python311\python.exe'
+    Start-Process -FilePath $py -ArgumentList '-m','python_engine.mt5_live_trader','--symbol','XAUUSD','--lot','0.02','--iterations','999999','--interval','0.5' -WorkingDirectory 'E:\scalping-robot-v5' -WindowStyle Hidden
+    $healedTrader = $true
+    Start-Sleep 5
+    try {
+        $health = Invoke-RestMethod 'http://localhost:8899/health' -TimeoutSec 8
+    } catch {}
+}
+
 # ── Read last 5 lines of trader log ───────────────────────
 $traderLog = Get-Content "$base\trader_err.log" -Tail 5 -ErrorAction SilentlyContinue
 $port8899  = netstat -ano | findstr ':8899'
+
+# ── Extract metrics for grade, balance trend, warning, and history ──
+$currentBalance  = $null
+$currentEquity   = $null
+$currentDailyPnl = $null
+$currentPrice    = $null
+$winRate         = $null
+$totalTrades     = $null
+
+if ($health) {
+    if ($null -ne $health.balance) { $currentBalance = [double]$health.balance }
+    if ($null -ne $health.equity) { $currentEquity = [double]$health.equity }
+    if ($null -ne $health.daily_pnl) { $currentDailyPnl = [double]$health.daily_pnl }
+    if ($null -ne $health.current_price -and $health.current_price -ne 0) { $currentPrice = [double]$health.current_price }
+    if ($null -ne $health.win_rate_pct) { $winRate = [double]$health.win_rate_pct }
+    if ($null -ne $health.total_trades) { $totalTrades = [int]$health.total_trades }
+}
+
+if (Test-Path $statusFile) {
+    try {
+        $liveData = Get-Content $statusFile -Raw | ConvertFrom-Json
+        if ($null -eq $currentBalance -and $null -ne $liveData.balance) { $currentBalance = [double]$liveData.balance }
+        if ($null -eq $currentEquity -and $null -ne $liveData.equity) { $currentEquity = [double]$liveData.equity }
+        if ($null -eq $currentDailyPnl -and $null -ne $liveData.daily_pnl) { $currentDailyPnl = [double]$liveData.daily_pnl }
+        if ($null -eq $currentPrice -and $null -ne $liveData.current_price -and $liveData.current_price -ne 0) { $currentPrice = [double]$liveData.current_price }
+        if ($null -eq $winRate -and $null -ne $liveData.win_rate_pct) { $winRate = [double]$liveData.win_rate_pct }
+        if ($null -eq $totalTrades -and $null -ne $liveData.total_trades) { $totalTrades = [int]$liveData.total_trades }
+    } catch {}
+}
+
+# ── Balance trend vs previous cycle (prev_balance.txt) ────
+$prevBalanceFile = "$base\prev_balance.txt"
+$prevBalance = $null
+$balanceTrend = "N/A (Baseline initialized)"
+
+if (Test-Path $prevBalanceFile) {
+    try {
+        $prevRaw = (Get-Content $prevBalanceFile -Raw -ErrorAction SilentlyContinue)
+        if ($prevRaw) {
+            $prevRaw = $prevRaw.Trim()
+            if ($prevRaw -match '^-?[\d\.]+$') {
+                $prevBalance = [double]$prevRaw
+            }
+        }
+    } catch {}
+}
+
+if ($null -ne $currentBalance) {
+    if ($null -ne $prevBalance) {
+        $balDiff = [math]::Round(($currentBalance - $prevBalance), 2)
+        if ($balDiff -gt 0) {
+            $balanceTrend = "+`$$balDiff (UP from `$$prevBalance to `$$currentBalance)"
+        } elseif ($balDiff -lt 0) {
+            $absDiff = [math]::Abs($balDiff)
+            $balanceTrend = "-`$$absDiff (DOWN from `$$prevBalance to `$$currentBalance)"
+        } else {
+            $balanceTrend = "`$0.00 (FLAT at `$$currentBalance)"
+        }
+    } else {
+        $balanceTrend = "`$0.00 (Baseline set at `$$currentBalance)"
+    }
+    Set-Content $prevBalanceFile $currentBalance
+}
+
+# ── Trade activity & 60-min stagnation check ───────────────
+$lastTradeDt = $null
+
+if (Test-Path "$base\trader_err.log") {
+    $tradeLines = Get-Content "$base\trader_err.log" -Tail 1000 -ErrorAction SilentlyContinue | Select-String -Pattern "\[TRADE CLOSED\]|\[NEW POSITION"
+    if ($tradeLines) {
+        $lastLine = $tradeLines | Select-Object -Last 1
+        if ($lastLine.Line -match '^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})') {
+            try {
+                $lastTradeDt = [datetime]::ParseExact($matches[1], 'yyyy-MM-dd HH:mm:ss', $null)
+            } catch {}
+        }
+    }
+}
+
+if (Test-Path $statusFile) {
+    try {
+        $sObj = Get-Content $statusFile -Raw | ConvertFrom-Json
+        if ($sObj.open_positions) {
+            foreach ($pos in $sObj.open_positions) {
+                if ($pos.open_time) {
+                    $posDt = [datetime]::Parse($pos.open_time).ToLocalTime()
+                    if ($null -eq $lastTradeDt -or $posDt -gt $lastTradeDt) {
+                        $lastTradeDt = $posDt
+                    }
+                }
+            }
+        }
+    } catch {}
+}
+
+$warnNoTrades = $false
+$hasCurrentPrice = ($null -ne $currentPrice -and $currentPrice -gt 0)
+
+if ($lastTradeDt) {
+    $minSinceTrade = ((Get-Date) - $lastTradeDt).TotalMinutes
+    if ($minSinceTrade -ge 60 -and $hasCurrentPrice) {
+        $warnNoTrades = $true
+    }
+} elseif ($hasCurrentPrice) {
+    # No trades recorded at all
+    $warnNoTrades = $true
+}
+
+# ── Performance Grade calculation ─────────────────────────
+$perfWinRate = if ($null -ne $winRate) { [double]$winRate } else { 0.0 }
+$perfGrade = 'C'
+if ($perfWinRate -gt 90) {
+    $perfGrade = 'A+'
+} elseif ($perfWinRate -gt 85) {
+    $perfGrade = 'A'
+} elseif ($perfWinRate -gt 75) {
+    $perfGrade = 'B'
+} else {
+    $perfGrade = 'C'
+}
+
+# ── Save balance history to balance_history.json ───────────
+$balanceHistoryFile = "$base\balance_history.json"
+$history = @()
+if (Test-Path $balanceHistoryFile) {
+    try {
+        $rawHist = Get-Content $balanceHistoryFile -Raw -ErrorAction SilentlyContinue
+        if ($rawHist -and $rawHist.Trim() -ne '') {
+            $parsedHist = $rawHist | ConvertFrom-Json
+            if ($parsedHist) {
+                $history = @($parsedHist)
+            }
+        }
+    } catch {
+        $history = @()
+    }
+}
+
+$historyEntry = [PSCustomObject]@{
+    cycle        = $cycleNum
+    timestamp    = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')
+    balance      = if ($null -ne $currentBalance) { [double]$currentBalance } else { 0.0 }
+    equity       = if ($null -ne $currentEquity) { [double]$currentEquity } else { 0.0 }
+    daily_pnl    = if ($null -ne $currentDailyPnl) { [double]$currentDailyPnl } else { 0.0 }
+    win_rate_pct = $perfWinRate
+    grade        = $perfGrade
+    trend        = $balanceTrend
+}
+$history += $historyEntry
+
+$jsonStr = if ($history.Count -eq 1) {
+    "[`n" + ($history[0] | ConvertTo-Json -Depth 5) + "`n]"
+} else {
+    $history | ConvertTo-Json -Depth 5
+}
+Set-Content $balanceHistoryFile $jsonStr
 
 # ── Print cycle report ─────────────────────────────────────
 $cycleTime = Get-Date -Format 'HH:mm:ss'
@@ -122,4 +300,14 @@ if ($traderLog) {
     $traderLog
 }
 Write-Host "PORT 8899: $port8899"
+
+if ($warnNoTrades) {
+    Write-Host "WARNING: No trades for 60+ min" -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "--- PERFORMANCE GRADE ---"
+Write-Host "PERFORMANCE GRADE : $perfGrade"
+Write-Host "Grade: $perfGrade (Win Rate: $perfWinRate%)"
+Write-Host "BALANCE TREND     : $balanceTrend"
 Write-Host ""

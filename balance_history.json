@@ -1,0 +1,32 @@
+[
+    {
+        "cycle":  39,
+        "timestamp":  "2026-10-04T08:24:59Z",
+        "balance":  10000,
+        "equity":  9984,
+        "daily_pnl":  0,
+        "win_rate_pct":  0,
+        "grade":  "C",
+        "trend":  "$0.00 (Baseline set at $10000)"
+    },
+    {
+        "cycle":  40,
+        "timestamp":  "2026-10-04T08:25:39Z",
+        "balance":  10000,
+        "equity":  10000,
+        "daily_pnl":  0,
+        "win_rate_pct":  0,
+        "grade":  "C",
+        "trend":  "$0.00 (FLAT at $10000)"
+    },
+    {
+        "cycle":  41,
+        "timestamp":  "2026-10-04T08:30:09Z",
+        "balance":  10000,
+        "equity":  9985,
+        "daily_pnl":  0,
+        "win_rate_pct":  0,
+        "grade":  "C",
+        "trend":  "$0.00 (FLAT at $10000)"
+    }
+]

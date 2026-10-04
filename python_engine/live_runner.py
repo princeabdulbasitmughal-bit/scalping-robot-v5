@@ -74,9 +74,9 @@ class ScalpingLiveRunner:
             else:
                 last_bar = self.bars[-1]
                 last_bar["close"] = self.current_price
-                if self.current_price > last_bar["high"]:
+                if self.current_price > last_bar.get("high", self.current_price):
                     last_bar["high"] = self.current_price
-                if self.current_price < last_bar["low"]:
+                if self.current_price < last_bar.get("low", self.current_price):
                     last_bar["low"] = self.current_price
                 last_bar["volume"] = last_bar.get("volume", 0) + 1
                 
@@ -91,23 +91,28 @@ class ScalpingLiveRunner:
             for pos in self.robot.open_positions:
                 closed = False
                 pnl = 0.0
-                if pos["type"] == ScalpingSignal.BUY:
-                    if self.current_price >= pos["tp"]:
+                pos_type = pos.get("type")
+                pos_tp = float(pos.get("tp", 0.0))
+                pos_sl = float(pos.get("sl", 0.0))
+                pos_entry = float(pos.get("entry", self.current_price))
+
+                if pos_type == ScalpingSignal.BUY:
+                    if self.current_price >= pos_tp and pos_tp > 0:
                         closed = True
-                        pnl = (pos["tp"] - pos["entry"]) / pip_size * (lot_size * 10.0)
+                        pnl = (pos_tp - pos_entry) / pip_size * (lot_size * 10.0)
                         pos["close_reason"] = "TP_HIT"
-                    elif self.current_price <= pos["sl"]:
+                    elif self.current_price <= pos_sl and pos_sl > 0:
                         closed = True
-                        pnl = (pos["sl"] - pos["entry"]) / pip_size * (lot_size * 10.0)
+                        pnl = (pos_sl - pos_entry) / pip_size * (lot_size * 10.0)
                         pos["close_reason"] = "SL_HIT"
-                elif pos["type"] == ScalpingSignal.SELL:
-                    if self.current_price <= pos["tp"]:
+                elif pos_type == ScalpingSignal.SELL:
+                    if self.current_price <= pos_tp and pos_tp > 0:
                         closed = True
-                        pnl = (pos["entry"] - pos["tp"]) / pip_size * (lot_size * 10.0)
+                        pnl = (pos_entry - pos_tp) / pip_size * (lot_size * 10.0)
                         pos["close_reason"] = "TP_HIT"
-                    elif self.current_price >= pos["sl"]:
+                    elif self.current_price >= pos_sl and pos_sl > 0:
                         closed = True
-                        pnl = (pos["entry"] - pos["sl"]) / pip_size * (lot_size * 10.0)
+                        pnl = (pos_entry - pos_sl) / pip_size * (lot_size * 10.0)
                         pos["close_reason"] = "SL_HIT"
                         
                 if closed:
@@ -125,12 +130,12 @@ class ScalpingLiveRunner:
             # Evaluate new signal
             sig = self.robot.evaluate_entry(indicators, spread)
             if sig in (ScalpingSignal.BUY, ScalpingSignal.SELL):
-                tp_dist = self.robot.config["tp_pips"] * pip_size
-                sl_dist = self.robot.config["sl_pips"] * pip_size
+                tp_dist = float(self.robot.config.get("tp_pips", 15.0)) * pip_size
+                sl_dist = float(self.robot.config.get("sl_pips", 30.0)) * pip_size
                 order = {
                     "id": len(self.trades_history) + len(self.robot.open_positions) + 1,
                     "type": sig,
-                    "symbol": self.robot.config["symbol"],
+                    "symbol": self.robot.config.get("symbol", "XAUUSD"),
                     "entry": self.current_price,
                     "lot": lot_size,
                     "tp": self.current_price + (tp_dist if sig == ScalpingSignal.BUY else -tp_dist),
@@ -141,14 +146,14 @@ class ScalpingLiveRunner:
                 
             # Write state snapshot atomically
             floating_pnl = sum(
-                ((self.current_price - p["entry"]) if p["type"] == ScalpingSignal.BUY else (p["entry"] - self.current_price)) / pip_size * (lot_size * 10.0)
+                ((self.current_price - float(p.get("entry", self.current_price))) if p.get("type") == ScalpingSignal.BUY else (float(p.get("entry", self.current_price)) - self.current_price)) / pip_size * (lot_size * 10.0)
                 for p in self.robot.open_positions
             )
             self.equity = round(self.balance + floating_pnl, 2)
             
             status = {
                 "status": "ACTIVE_SCALPING",
-                "symbol": self.robot.config["symbol"],
+                "symbol": self.robot.config.get("symbol", "XAUUSD"),
                 "current_price": self.current_price,
                 "balance": round(self.balance, 2),
                 "equity": self.equity,

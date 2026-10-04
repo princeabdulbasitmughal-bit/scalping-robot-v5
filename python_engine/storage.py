@@ -40,7 +40,7 @@ def atomic_write_json(
             f.flush()
             try:
                 os.fsync(f.fileno())
-            except (AttributeError, OSError):
+            except (AttributeError, OSError) as e:
                 pass
 
         # Atomically replace destination with retries and jitter for Windows file lock resiliency
@@ -53,6 +53,8 @@ def atomic_write_json(
                 last_err = err
                 # Exponential backoff with random jitter to avoid reader-writer resonance
                 sleep_time = (retry_delay * (1.5 ** attempt)) + random.uniform(0.005, 0.025)
+                if sleep_time > 5.0:
+                    logger.warning(f"[RETRY SLEEP WARNING] sleep_time={sleep_time:.2f}s exceeds 5s in atomic_write_json retry loop")
                 time.sleep(sleep_time)
 
         logger.warning(f"atomic_write_json failed after {max_retries} attempts on {path}: {last_err}")
@@ -67,8 +69,8 @@ def atomic_write_json(
         if temp_path.exists():
             try:
                 temp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to unlink temp file {temp_path}: {e}")
 
 
 def safe_read_json(
@@ -94,12 +96,18 @@ def safe_read_json(
                 raw_bytes = f.read()
             if not raw_bytes:
                 # File was momentarily being created, retry
-                time.sleep(retry_delay * (1.5 ** attempt))
+                sleep_time = retry_delay * (1.5 ** attempt)
+                if sleep_time > 5.0:
+                    logger.warning(f"[RETRY SLEEP WARNING] sleep_time={sleep_time:.2f}s exceeds 5s in safe_read_json")
+                time.sleep(sleep_time)
                 continue
             return json.loads(raw_bytes.decode("utf-8"))
         except (json.JSONDecodeError, PermissionError, OSError, UnicodeDecodeError) as err:
             last_err = err
-            time.sleep((retry_delay * (1.5 ** attempt)) + random.uniform(0.005, 0.02))
+            sleep_time = (retry_delay * (1.5 ** attempt)) + random.uniform(0.005, 0.02)
+            if sleep_time > 5.0:
+                logger.warning(f"[RETRY SLEEP WARNING] sleep_time={sleep_time:.2f}s exceeds 5s in safe_read_json error backoff")
+            time.sleep(sleep_time)
 
     logger.debug(f"safe_read_json fallback to default for {path} after {max_retries} attempts: {last_err}")
     return default

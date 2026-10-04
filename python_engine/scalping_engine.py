@@ -55,12 +55,12 @@ class EconomicNewsFilter:
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
                 return dt.timestamp()
-            except Exception:
+            except Exception as e:
                 for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
                     try:
                         dt = datetime.strptime(event_time, fmt).replace(tzinfo=timezone.utc)
                         return dt.timestamp()
-                    except ValueError:
+                    except ValueError as e:
                         continue
         return 0.0
 
@@ -79,7 +79,7 @@ class EconomicNewsFilter:
                 "currency": currency.upper(),
                 "impact": impact.upper()
             })
-            self.events.sort(key=lambda x: x["timestamp"])
+            self.events.sort(key=lambda x: x.get("timestamp", 0.0))
 
     def clear_events(self):
         self.events.clear()
@@ -164,9 +164,9 @@ class EconomicNewsFilter:
         target_curr = currency.upper() if currency else None
 
         for event in self.events:
-            if target_curr and event["currency"] != target_curr:
+            if target_curr and event.get("currency") != target_curr:
                 continue
-            event_ts = event["timestamp"]
+            event_ts = float(event.get("timestamp", 0.0))
             window_start = event_ts - self.pre_seconds
             window_end = event_ts + self.post_seconds
 
@@ -253,39 +253,40 @@ class ScalpingRobotV5:
         Each bar: {'open', 'high', 'low', 'close', 'volume', 'timestamp'}
         """
         min_required = max(
-            self.config["bb_period"],
-            self.config["slow_ema"],
-            self.config["rsi_period"],
-            self.config["atr_period"]
+            int(self.config.get("bb_period", 20)),
+            int(self.config.get("slow_ema", 21)),
+            int(self.config.get("rsi_period", 14)),
+            int(self.config.get("atr_period", 14))
         ) + 5
         if len(bars) < min_required:
             return {}
 
-        closes = [b["close"] for b in bars]
-        highs = [b["high"] for b in bars]
-        lows = [b["low"] for b in bars]
+        closes = [float(b.get("close", 0.0)) for b in bars if isinstance(b, dict)]
+        highs = [float(b.get("high", 0.0)) for b in bars if isinstance(b, dict)]
+        lows = [float(b.get("low", 0.0)) for b in bars if isinstance(b, dict)]
 
         # 1. EMAs
-        fast_ema = self._calc_ema(closes, self.config["fast_ema"])
-        slow_ema = self._calc_ema(closes, self.config["slow_ema"])
+        fast_ema = self._calc_ema(closes, int(self.config.get("fast_ema", 8)))
+        slow_ema = self._calc_ema(closes, int(self.config.get("slow_ema", 21)))
 
         # 2. Bollinger Bands
-        period = self.config["bb_period"]
+        period = int(self.config.get("bb_period", 20))
         slice_closes = closes[-period:]
         bb_mid = sum(slice_closes) / max(1, period)
         variance = sum((x - bb_mid) ** 2 for x in slice_closes) / max(1, period)
         std_dev = math.sqrt(max(0.0, variance))
-        bb_upper = bb_mid + (self.config["bb_std"] * std_dev)
-        bb_lower = bb_mid - (self.config["bb_std"] * std_dev)
+        bb_std = float(self.config.get("bb_std", 2.0))
+        bb_upper = bb_mid + (bb_std * std_dev)
+        bb_lower = bb_mid - (bb_std * std_dev)
         bb_width_pct = ((bb_upper - bb_lower) / max(1e-6, bb_mid)) * 100.0
 
         # 3. RSI
-        rsi = self._calc_rsi(closes, self.config["rsi_period"])
+        rsi = self._calc_rsi(closes, int(self.config.get("rsi_period", 14)))
 
         # 4. Standard ATR & Baseline ATR
-        smoothing_method = self.config.get("atr_smoothing", "rma")
-        atr = self._calc_atr(highs, lows, closes, self.config["atr_period"], method=smoothing_method)
-        baseline_period = min(len(closes) - 1, self.config.get("baseline_atr_period", 30))
+        smoothing_method = str(self.config.get("atr_smoothing", "rma"))
+        atr = self._calc_atr(highs, lows, closes, int(self.config.get("atr_period", 14)), method=smoothing_method)
+        baseline_period = min(len(closes) - 1, int(self.config.get("baseline_atr_period", 30)))
         atr_baseline = self._calc_atr(highs, lows, closes, max(1, baseline_period), method=smoothing_method)
 
         # 5. Instantaneous True Range of current bar
@@ -423,26 +424,29 @@ class ScalpingRobotV5:
             return ScalpingSignal.HOLD
 
         # 1. Spread Protection
-        if current_spread_pips > self.config["max_spread_pips"]:
+        max_spread = float(self.config.get("max_spread_pips", 3.5))
+        if current_spread_pips > max_spread:
             self.shield_status = {
                 "status": "SPREAD_PROTECTION",
-                "reason": f"Spread {current_spread_pips} > max {self.config['max_spread_pips']}",
+                "reason": f"Spread {current_spread_pips} > max {max_spread}",
                 "halted": True
             }
             return ScalpingSignal.HOLD
 
         # 2. Max Orders Protection
-        if len(self.open_positions) >= self.config["max_orders"]:
+        max_ord = int(self.config.get("max_orders", 1))
+        if len(self.open_positions) >= max_ord:
             self.shield_status = {
                 "status": "MAX_ORDERS_REACHED",
-                "reason": f"Open positions {len(self.open_positions)} >= max {self.config['max_orders']}",
+                "reason": f"Open positions {len(self.open_positions)} >= max {max_ord}",
                 "halted": True
             }
             return ScalpingSignal.HOLD
 
         # 3. High-Impact News Filter Protection (Blackout)
         if self.config.get("news_filter_enabled", True):
-            currency = "USD" if "XAU" in self.config["symbol"] or "USD" in self.config["symbol"] else self.config["symbol"][:3]
+            sym = str(self.config.get("symbol", "XAUUSD"))
+            currency = "USD" if ("XAU" in sym or "USD" in sym) else sym[:3]
             is_blackout, news_event = self.news_filter.is_blackout(current_time=current_time, currency=currency)
             if is_blackout and news_event:
                 self.shield_status = {
@@ -456,10 +460,10 @@ class ScalpingRobotV5:
         # 4. Volatility Shield Circuit Breaker Protection
         if self.config.get("volatility_shield_enabled", True):
             vol_ratio = indicators.get("volatility_ratio", 1.0)
-            threshold = self.config.get("volatility_spike_threshold", 2.2)
+            threshold = float(self.config.get("volatility_spike_threshold", 2.2))
 
             if vol_ratio >= threshold:
-                self.volatility_halt_counter = self.config.get("volatility_cooldown_bars", 5)
+                self.volatility_halt_counter = int(self.config.get("volatility_cooldown_bars", 5))
                 self.shield_status = {
                     "status": "VOLATILITY_HALT",
                     "reason": f"Volatility spike detected: {vol_ratio:.2f}x baseline (threshold: {threshold}x)",
@@ -481,23 +485,28 @@ class ScalpingRobotV5:
         # Shield cleared
         self.shield_status = {"status": "NORMAL", "reason": "All risk guards passed", "halted": False}
 
-        price = indicators["close"]
-        bb_lower = indicators["bb_lower"]
-        bb_upper = indicators["bb_upper"]
-        fast_ema = indicators["fast_ema"]
-        slow_ema = indicators["slow_ema"]
-        rsi = indicators["rsi"]
+        price = float(indicators.get("close", 0.0))
+        bb_lower = float(indicators.get("bb_lower", 0.0))
+        bb_upper = float(indicators.get("bb_upper", 0.0))
+        fast_ema = float(indicators.get("fast_ema", 0.0))
+        slow_ema = float(indicators.get("slow_ema", 0.0))
+        rsi = float(indicators.get("rsi", 50.0))
+
+        if price <= 0.0 or bb_lower <= 0.0 or bb_upper <= 0.0:
+            return ScalpingSignal.HOLD
 
         # BUY SIGNAL:
         # Price tags or dips below lower Bollinger Band AND RSI is oversold (< 33) AND fast EMA >= slow EMA (momentum confirmation)
+        rsi_os = float(self.config.get("rsi_oversold", 30.0))
+        rsi_ob = float(self.config.get("rsi_overbought", 70.0))
         ema_bullish = fast_ema >= slow_ema * 0.9998  # allow near-cross
-        if price <= bb_lower * 1.0005 and rsi <= self.config["rsi_oversold"] + 3.0 and ema_bullish:
+        if price <= bb_lower * 1.0005 and rsi <= rsi_os + 3.0 and ema_bullish:
             return ScalpingSignal.BUY
 
         # SELL SIGNAL:
         # Price tags or rises above upper Bollinger Band AND RSI is overbought (> 67) AND fast EMA <= slow EMA (momentum confirmation)
         ema_bearish = fast_ema <= slow_ema * 1.0002  # allow near-cross
-        if price >= bb_upper * 0.9995 and rsi >= self.config["rsi_overbought"] - 3.0 and ema_bearish:
+        if price >= bb_upper * 0.9995 and rsi >= rsi_ob - 3.0 and ema_bearish:
             return ScalpingSignal.SELL
 
         return ScalpingSignal.HOLD
@@ -513,7 +522,7 @@ class ScalpingRobotV5:
         During elevated ATR or post-shock regimes, stop distance dynamically widens to prevent
         whipsaw liquidations while maintaining risk integrity.
         """
-        pip_size = self.config["pip_size"]
+        pip_size = float(self.config.get("pip_size", 0.1))
         base_sl_pips = float(self.config.get("sl_pips", 30.0))
         base_tp_pips = float(self.config.get("tp_pips", 15.0))
 
@@ -521,7 +530,7 @@ class ScalpingRobotV5:
             sl_pips = base_sl_pips
             tp_pips = base_tp_pips
         else:
-            atr_val = indicators.get("atr", pip_size * base_sl_pips / 2.0)
+            atr_val = float(indicators.get("atr", pip_size * base_sl_pips / 2.0))
             atr_pips = atr_val / pip_size
             sl_mult = float(self.config.get("sl_atr_multiplier", 2.0))
             tp_mult = float(self.config.get("tp_atr_multiplier", 1.5))
@@ -569,7 +578,7 @@ class ScalpingRobotV5:
         risk_pct = float(risk_percent if risk_percent is not None else self.config.get("risk_percent", 1.0))
         risk_dollars = bal * (risk_pct / 100.0)
 
-        pip_value = self.config["pip_value"]
+        pip_value = float(self.config.get("pip_value", 1.0))
         min_lots = float(self.config.get("min_lot_size", 0.01))
         max_lots = float(self.config.get("max_lot_size", 5.0))
         lot_step = float(self.config.get("lot_step", 0.01))
@@ -578,7 +587,7 @@ class ScalpingRobotV5:
             effective_sl_pips = sl_pips
         else:
             stops = self.calculate_dynamic_stops(indicators)
-            effective_sl_pips = stops["sl_pips"]
+            effective_sl_pips = float(stops.get("sl_pips", base_sl_pips if 'base_sl_pips' in locals() else 30.0))
 
         # Dollar risk per lot = Stop Loss in Pips * Pip Value per Lot
         risk_per_lot = max(1e-4, effective_sl_pips * pip_value)
