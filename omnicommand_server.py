@@ -653,6 +653,86 @@ async def system_health():
 
 
 # ---------------------------------------------------------------------------
+# Manual daily PnL / circuit-breaker reset endpoint
+# ---------------------------------------------------------------------------
+@app.post("/api/reset-daily-pnl")
+async def reset_daily_pnl():
+    """
+    Manually reset the daily PnL counters and clear the circuit breaker so
+    trading resumes immediately without waiting for midnight UTC rollover.
+
+    Resets in live_status.json:
+      - daily_pnl        → 0.0
+      - daily_loss       → 0.0
+      - circuit_breaker_fired → False
+      - trading_halted   → False
+    """
+    global _status_cache, _status_cache_ts
+    try:
+        # 1. Read current status (bypass TTL cache to get the freshest copy)
+        live: dict = {}
+        if STATUS_FILE.exists():
+            try:
+                raw = STATUS_FILE.read_bytes()
+                if raw.strip():
+                    live = json.loads(raw.decode("utf-8", errors="replace"))
+            except Exception as read_exc:
+                log.warning("reset-daily-pnl: could not read status file: %s", read_exc)
+
+        # 2. Apply the reset fields
+        live["daily_pnl"]             = 0.0
+        live["daily_loss"]            = 0.0
+        live["circuit_breaker_fired"] = False
+        live["trading_halted"]        = False
+        live["updated_at"]            = datetime.now(timezone.utc).isoformat() + "Z"
+
+        # 3. Persist atomically
+        tmp_path = STATUS_FILE.with_suffix(".tmp_reset")
+        try:
+            tmp_path.write_bytes(json.dumps(live, indent=2, default=str).encode("utf-8"))
+            os.replace(tmp_path, STATUS_FILE)
+            log.info("reset-daily-pnl: live_status.json updated successfully.")
+        except Exception as write_exc:
+            log.error("reset-daily-pnl: failed to write status file: %s", write_exc)
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return JSONResponse(
+                {"success": False, "error": f"Could not write status file: {write_exc}"},
+                status_code=500,
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+
+        # 4. Invalidate in-memory TTL cache so next /status read picks up the reset
+        _status_cache = live
+        _status_cache_ts = 0.0
+
+        log.info(
+            "reset-daily-pnl: circuit breaker cleared | daily_pnl=0.0 | trading_halted=False"
+        )
+        return JSONResponse(
+            {
+                "success": True,
+                "message": "Daily PnL reset. Trading resumed.",
+                "daily_pnl": 0.0,
+                "daily_loss": 0.0,
+                "circuit_breaker_fired": False,
+                "trading_halted": False,
+                "reset_at": live["updated_at"],
+            },
+            headers={"Access-Control-Allow-Origin": "*"},
+        )
+    except Exception as exc:
+        log.exception("reset-daily-pnl: unexpected error: %s", exc)
+        return JSONResponse(
+            {"success": False, "error": str(exc)},
+            status_code=500,
+            headers={"Access-Control-Allow-Origin": "*"},
+        )
+
+
+# ---------------------------------------------------------------------------
 # Wave 15: ML Status endpoint + Dashboard v2 serve
 # ---------------------------------------------------------------------------
 @app.get("/ml_status")

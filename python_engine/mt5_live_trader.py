@@ -118,6 +118,7 @@ try:
     from wave58_price_range_filter import price_range_filter
     from wave59_ma_trend_filter import ma_trend_filter
     from wave60_profit_streak_booster import profit_streak_booster
+    from wave61_opening_range_breakout import opening_range_breakout
     _WAVES_LOADED = True
 except Exception:
     _WAVES_LOADED = False
@@ -170,7 +171,7 @@ except Exception:
     price_range_filter = None
     ma_trend_filter = None
     profit_streak_booster = None
-
+    opening_range_breakout = None
 
 
 
@@ -1514,6 +1515,12 @@ class MT5LiveTrader:
                     ma_trend_filter.update(current_price)
                 except Exception:
                     pass
+            # Wave 61: Feed current price to Opening Range Breakout tracker
+            if _WAVES_LOADED and opening_range_breakout is not None:
+                try:
+                    opening_range_breakout.update(current_price)
+                except Exception:
+                    pass
             self.update_candles(price)
 
 
@@ -2767,6 +2774,16 @@ class MT5LiveTrader:
             except Exception as _mat59e:
                 logger.debug(f"[MA TREND] Error: {_mat59e}")
 
+        # ── Wave 61: Opening Range Breakout (ORB filter — only trade breakouts) ──
+        if _WAVES_LOADED and opening_range_breakout is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                _sig_str61 = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
+                if opening_range_breakout.is_signal_blocked(_sig_str61):
+                    logger.info(f"[ORB] Blocked: {_sig_str61} — price not breaking opening range")
+                    return ScalpingSignal.HOLD
+            except Exception as _orb61e:
+                logger.debug(f"[ORB] Error: {_orb61e}")
+
         # ── Wave 26: Time Filter (scheduled release window) ───────────────────
         if _WAVES_LOADED and wave26_time_filter is not None and raw_signal != ScalpingSignal.HOLD:
             try:
@@ -3531,6 +3548,13 @@ class MT5LiveTrader:
             if _WAVES_LOADED and profit_streak_booster is not None:
                 try:
                     state["profit_streak_booster"] = profit_streak_booster.info()
+                except Exception:
+                    pass
+
+            # Wave 61: Inject opening range breakout status
+            if _WAVES_LOADED and opening_range_breakout is not None:
+                try:
+                    state["opening_range_breakout"] = opening_range_breakout.info()
                 except Exception:
                     pass
 

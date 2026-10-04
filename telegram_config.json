@@ -1,0 +1,10 @@
+{
+  "bot_token": "",
+  "chat_id": "",
+  "enabled": false,
+  "min_alert_interval_sec": 60,
+  "alert_on_trade_open": true,
+  "alert_on_trade_close": true,
+  "alert_on_circuit_breaker": true,
+  "alert_on_daily_summary": true
+}
