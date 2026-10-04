@@ -587,7 +587,7 @@ class ScalpingRobotV5:
             effective_sl_pips = sl_pips
         else:
             stops = self.calculate_dynamic_stops(indicators)
-            effective_sl_pips = float(stops.get("sl_pips", base_sl_pips if 'base_sl_pips' in locals() else 30.0))
+            effective_sl_pips = float(stops.get("sl_pips", float(self.config.get("sl_pips", 30.0))))
 
         # Dollar risk per lot = Stop Loss in Pips * Pip Value per Lot
         risk_per_lot = max(1e-4, effective_sl_pips * pip_value)

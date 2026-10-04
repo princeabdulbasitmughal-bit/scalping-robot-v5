@@ -740,7 +740,7 @@ async def ml_status():
     """Return last ML predictor result from live_status.json."""
     try:
         import json as _j
-        status_path = os.path.join(ROOT, "live_status.json")
+        status_path = os.path.join(str(BASE_DIR), "live_status.json")
         if not os.path.exists(status_path):
             return JSONResponse({"error": "live_status.json not found"}, status_code=404,
                                 headers={"Access-Control-Allow-Origin": "*"})
@@ -759,7 +759,7 @@ async def ml_status():
 async def serve_dashboard_v2():
     """Serve Wave 15 Chart.js advanced dashboard."""
     try:
-        p = os.path.join(ROOT, "dashboard_v2.html")
+        p = os.path.join(str(BASE_DIR), "dashboard_v2.html")
         if os.path.exists(p):
             with open(p, encoding="utf-8") as f:
                 return HTMLResponse(f.read())

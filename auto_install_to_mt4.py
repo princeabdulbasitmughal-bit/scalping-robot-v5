@@ -81,7 +81,7 @@ def main():
         print("[INFO] No active MetaTrader 4 data folders found automatically in AppData.")
         print("If MetaTrader 4 is installed elsewhere or running in portable mode,")
         print("run this script with your MT4 data directory as an argument:")
-        print('  python auto_install_to_mt4.py "C:\Path\To\Your\MT4\DataFolder"')
+        print(r'  python auto_install_to_mt4.py "C:\Path\To\Your\MT4\DataFolder"')
         print("\nTo find your MT4 Data Folder:")
         print("  1. Open MetaTrader 4")
         print("  2. Click File -> Open Data Folder")

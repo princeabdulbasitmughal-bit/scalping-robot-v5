@@ -1,4 +1,4 @@
-"""
+r"""
 Tunnel Watchdog - Auto-restarts serveo.net SSH tunnel permanently
 Requirements:
 1. Tunnel must use serveo.net ONLY (NOT ngrok or cloudflare - they are BLOCKED)
