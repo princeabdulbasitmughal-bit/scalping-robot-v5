@@ -78,6 +78,10 @@ try:
     from wave14_auto_tuner import auto_tuner
     from wave19_volatility_tpsl import vol_tpsl_adjuster
     from wave20_spike_filter import spike_filter
+    from wave21_news_guard import news_guard
+    from wave22_equity_curve_halt import equity_curve_halt
+    from wave23_spread_optimizer import spread_optimizer as wave23_spread_optimizer
+    from wave24_daily_profit_lock import daily_profit_lock
     _WAVES_LOADED = True
 except Exception:
     _WAVES_LOADED = False
@@ -90,6 +94,11 @@ except Exception:
     auto_tuner = None
     vol_tpsl_adjuster = None
     spike_filter = None
+    news_guard = None
+    equity_curve_halt = None
+    wave23_spread_optimizer = None
+    daily_profit_lock = None
+
 
 LOG_DIR = Path(__file__).resolve().parent.parent
 TRADER_LOG_FILE = LOG_DIR / "trader.log"
@@ -678,6 +687,23 @@ class MT5LiveTrader:
         if self.spread_pips > max_allowed:
             return False, f"SPREAD_EXCEEDED ({self.spread_pips:.1f} > {max_allowed:.1f} pips)"
 
+        # Wave 23: Session-aware dynamic spread threshold
+        if _WAVES_LOADED and wave23_spread_optimizer is not None:
+            try:
+                sess_name = None
+                vol_idx = 1.0
+                if session_optimizer is not None:
+                    _si = session_optimizer.get_current_session_info()
+                    sess_name = _si.get("session")
+                    vol_idx = float(_si.get("vol_index", 1.0))
+                _sp_ok, _sp_reason = wave23_spread_optimizer.is_spread_ok(
+                    self.spread_pips, session_name=sess_name, vol_index=vol_idx
+                )
+                if not _sp_ok:
+                    return False, _sp_reason
+            except Exception:
+                pass
+
         # Liquidity shock / news spread blowout guard
         spike_ratio = float(self.config.get("spread_spike_ratio", 1.5))
         if len(self._spread_history) >= 5 and self._rolling_spread_ema > 0:
@@ -685,6 +711,7 @@ class MT5LiveTrader:
                 return False, f"SPREAD_SPIKE ({self.spread_pips:.1f} vs EMA {self._rolling_spread_ema:.1f} pips)"
 
         return True, "OK"
+
 
     def check_news_time_buffer(self, now_dt: Optional[datetime] = None) -> Tuple[bool, str]:
         """
@@ -1133,6 +1160,13 @@ class MT5LiveTrader:
                         except Exception:
                             pass
 
+                    # Wave 22: record result for equity curve halt
+                    if _WAVES_LOADED and equity_curve_halt is not None:
+                        try:
+                            equity_curve_halt.record_trade(pnl, pnl >= 0)
+                        except Exception:
+                            pass
+
                     # Wave 12: Telegram trade close alert
                     if _WAVES_LOADED and telegram_alerter is not None:
                         try:
@@ -1216,6 +1250,14 @@ class MT5LiveTrader:
                 self.consecutive_losses = 0
                 self._cb_pause_until = 0.0
                 self._cooling_down_until = 0.0
+
+                # Wave 24: Reset daily profit lock at midnight UTC
+                if _WAVES_LOADED and daily_profit_lock is not None:
+                    try:
+                        daily_profit_lock.reset()
+                        logger.info("[DAILY RESET] Wave 24: daily_profit_lock reset.")
+                    except Exception:
+                        pass
 
                 reset_msg = f"[DAILY RESET] UTC midnight crossed → {today_utc}. All daily P&L/counters zeroed."
                 logger.info(reset_msg)
@@ -1845,8 +1887,17 @@ class MT5LiveTrader:
         except Exception:
             pass
 
+        # Wave 24: Daily Profit Lock — apply lot reduction in protect mode
+        if _WAVES_LOADED and daily_profit_lock is not None:
+            try:
+                daily_profit_lock.update(self.daily_pnl)
+                actual_lot = daily_profit_lock.apply_lot(actual_lot)
+            except Exception:
+                pass
+
         lot = max(0.01, min(actual_lot, max_lot_size))
         return round(lot, 2)
+
 
 
     def _calculate_macd(self, prices: list, fast: int = 12, slow: int = 26, signal_period: int = 9):
@@ -2109,6 +2160,26 @@ class MT5LiveTrader:
             except Exception as _se:
                 logger.debug(f"[SPIKE FILTER] Error: {_se}")
 
+        # ── Wave 21: News Guard ───────────────────────────────────────────────
+        if _WAVES_LOADED and news_guard is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                _news_ok, _news_reason = news_guard.is_trading_allowed()
+                if not _news_ok:
+                    logger.info(f"[NEWS GUARD] Blocked: {_news_reason}")
+                    return ScalpingSignal.HOLD
+            except Exception as _ne:
+                logger.debug(f"[NEWS GUARD] Error: {_ne}")
+
+        # ── Wave 22: Equity Curve Halt ────────────────────────────────────────
+        if _WAVES_LOADED and equity_curve_halt is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                _eq_ok, _eq_reason = equity_curve_halt.is_trading_allowed(self.balance)
+                if not _eq_ok:
+                    logger.warning(f"[EQ HALT] Blocked: {_eq_reason}")
+                    return ScalpingSignal.HOLD
+            except Exception as _eqe:
+                logger.debug(f"[EQ HALT] Error: {_eqe}")
+
         # ── Wave 10: Session Quality Gate ────────────────────────────────────
         if _WAVES_LOADED and session_optimizer is not None:
             try:
@@ -2120,7 +2191,7 @@ class MT5LiveTrader:
             except Exception as _e:
                 logger.debug(f"[SESSION GATE] error: {_e}")
 
-        # ── Wave 8: Signal Quality Score Gate (score >= 55 required) ─────────
+        # ── Wave 8: Signal Quality Score Gate (score >= 55 required, 70 in protect mode) ──
         if _WAVES_LOADED and signal_scorer is not None and raw_signal != ScalpingSignal.HOLD:
             try:
                 closes_list = [float(b.get("close", self.current_price)) for b in list(self.bars)[-30:] if isinstance(b, dict)]
@@ -2133,10 +2204,17 @@ class MT5LiveTrader:
                     market_regime=self._market_regime,
                     ema_cross=self._ema_cross_signal
                 )
-                if score < 55:
-                    logger.debug(f"[SCORE GATE] Quality {score}/100 < 55 — suppressing {raw_signal}")
+                # Wave 24: Use elevated threshold when daily profit lock is active
+                _min_score = 55
+                if _WAVES_LOADED and daily_profit_lock is not None:
+                    try:
+                        _min_score = daily_profit_lock.get_min_score(55)
+                    except Exception:
+                        pass
+                if score < _min_score:
+                    logger.debug(f"[SCORE GATE] Quality {score}/100 < {_min_score} — suppressing {raw_signal}")
                     return ScalpingSignal.HOLD
-                logger.debug(f"[SCORE GATE] Quality {score}/100 >= 55 — {raw_signal} confirmed")
+                logger.debug(f"[SCORE GATE] Quality {score}/100 >= {_min_score} — {raw_signal} confirmed")
             except Exception as _e:
                 logger.debug(f"[SCORE GATE] error: {_e}")
 
@@ -2536,6 +2614,34 @@ class MT5LiveTrader:
             if _WAVES_LOADED and spike_filter is not None:
                 try:
                     state["spike_filter"] = spike_filter.info()
+                except Exception:
+                    pass
+
+            # Wave 21: Inject news guard status into live_status.json
+            if _WAVES_LOADED and news_guard is not None:
+                try:
+                    state["news_guard"] = news_guard.info()
+                except Exception:
+                    pass
+
+            # Wave 22: Inject equity curve halt status into live_status.json
+            if _WAVES_LOADED and equity_curve_halt is not None:
+                try:
+                    state["equity_curve_halt"] = equity_curve_halt.info()
+                except Exception:
+                    pass
+
+            # Wave 23: Inject spread optimizer status into live_status.json
+            if _WAVES_LOADED and wave23_spread_optimizer is not None:
+                try:
+                    state["spread_optimizer"] = wave23_spread_optimizer.info()
+                except Exception:
+                    pass
+
+            # Wave 24: Inject daily profit lock status into live_status.json
+            if _WAVES_LOADED and daily_profit_lock is not None:
+                try:
+                    state["daily_profit_lock"] = daily_profit_lock.info()
                 except Exception:
                     pass
 
