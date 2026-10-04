@@ -61,6 +61,28 @@ except ImportError as e:
     from scalping_engine import ScalpingRobotV5, ScalpingSignal
     from storage import atomic_write_json, safe_read_json
 
+# ---------------------------------------------------------------------------
+# Wave 8-12 optional module imports (safe fallback if files missing)
+# ---------------------------------------------------------------------------
+_WAVES_ROOT = str(Path(__file__).resolve().parent.parent)
+if _WAVES_ROOT not in sys.path:
+    sys.path.insert(0, _WAVES_ROOT)
+
+try:
+    from wave8_signal_optimizer import signal_scorer
+    from wave9_risk_manager import risk_manager
+    from wave10_session_optimizer import session_optimizer
+    from wave11_profit_optimizer import profit_optimizer
+    from wave12_telegram_alerts import telegram_alerter
+    _WAVES_LOADED = True
+except Exception:
+    _WAVES_LOADED = False
+    signal_scorer = None
+    risk_manager = None
+    session_optimizer = None
+    profit_optimizer = None
+    telegram_alerter = None
+
 LOG_DIR = Path(__file__).resolve().parent.parent
 TRADER_LOG_FILE = LOG_DIR / "trader.log"
 TRADES_LOG_FILE = LOG_DIR / "trades.log"
@@ -1080,6 +1102,24 @@ class MT5LiveTrader:
                     sys.stdout.write(msg)
                     sys.stdout.flush()
                     logger.info(msg.strip())
+
+                    # Wave 11: record result for streak sizing
+                    if _WAVES_LOADED and profit_optimizer is not None:
+                        try:
+                            profit_optimizer.record_result(pnl >= 0)
+                        except Exception:
+                            pass
+
+                    # Wave 12: Telegram trade close alert
+                    if _WAVES_LOADED and telegram_alerter is not None:
+                        try:
+                            telegram_alerter.alert_trade_close(
+                                str(pos.get("type", "")), pnl,
+                                str(pos.get("close_reason", "")), self.balance
+                            )
+                        except Exception:
+                            pass
+
                 else:
                     remaining_positions.append(pos)
 
@@ -1499,6 +1539,25 @@ class MT5LiveTrader:
                 t_sig_end = time.perf_counter_ns()
                 self.latency_metrics["tick_to_signal_us"] = round((t_sig_end - t_sig_start) / 1000.0, 2)
 
+                # ── Wave 9: Risk Manager Gate ─────────────────────────────────
+                if _WAVES_LOADED and risk_manager is not None and signal in [ScalpingSignal.BUY, ScalpingSignal.SELL]:
+                    try:
+                        risk_manager.update_equity(self.equity)
+                        risk_check = risk_manager.should_trade(
+                            balance=self.balance,
+                            equity=self.equity,
+                            daily_pnl=self.daily_pnl,
+                            daily_loss=self.daily_loss,
+                            open_positions=list(self.open_positions),
+                            new_signal=signal
+                        )
+                        if not risk_check.get("allowed", True):
+                            logger.debug(f"[RISK GATE] Blocked: {risk_check.get('reason','risk limit')}")
+                            signal = ScalpingSignal.HOLD
+                            self.last_signal = signal
+                    except Exception as _e:
+                        logger.debug(f"[RISK GATE] error: {_e}")
+
                 if signal in [ScalpingSignal.BUY, ScalpingSignal.SELL]:
                     now_utc = datetime.utcnow()
 
@@ -1617,6 +1676,13 @@ class MT5LiveTrader:
                         sys.stdout.write(msg)
                         sys.stdout.flush()
                         logger.info(msg.strip())
+
+                        # Wave 12: Telegram trade open alert
+                        if _WAVES_LOADED and telegram_alerter is not None:
+                            try:
+                                telegram_alerter.alert_trade_open(str(signal), fill_price, sl, tp, lot_size)
+                            except Exception:
+                                pass
 
                     t_dispatch_end = time.perf_counter_ns()
                     self.latency_metrics["signal_to_dispatch_us"] = round((t_dispatch_end - t_dispatch_start) / 1000.0, 2)
@@ -1969,6 +2035,37 @@ class MT5LiveTrader:
             logger.debug(f"[SIGNAL FIRED] {tier_hit} | MACD hist={macd_hist:.4f} regime={self._market_regime} ema_cross={self._ema_cross_signal} -> {raw_signal}")
         else:
             logger.debug(f"[SIGNAL FIRED] {tier_hit} | MACD skipped regime={self._market_regime} ema_cross={self._ema_cross_signal} -> {raw_signal}")
+
+        # ── Wave 10: Session Quality Gate ────────────────────────────────────
+        if _WAVES_LOADED and session_optimizer is not None:
+            try:
+                sess_info = session_optimizer.get_current_session_info()
+                if not sess_info.get("tradeable", True):
+                    logger.debug(f"[SESSION GATE] {sess_info.get('reason','low quality')} — HOLD")
+                    return ScalpingSignal.HOLD
+                logger.debug(f"[SESSION OK] {sess_info.get('session','?')} vol_idx={sess_info.get('vol_index',1):.2f}")
+            except Exception as _e:
+                logger.debug(f"[SESSION GATE] error: {_e}")
+
+        # ── Wave 8: Signal Quality Score Gate (score >= 55 required) ─────────
+        if _WAVES_LOADED and signal_scorer is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                closes_list = [float(b.get("close", self.current_price)) for b in list(self.bars)[-30:] if isinstance(b, dict)]
+                score = signal_scorer.score_signal(
+                    signal=raw_signal,
+                    closes=closes_list,
+                    bars=list(self.bars)[-5:],
+                    rsi=rsi,
+                    bb_squeeze=self._bb_squeeze,
+                    market_regime=self._market_regime,
+                    ema_cross=self._ema_cross_signal
+                )
+                if score < 55:
+                    logger.debug(f"[SCORE GATE] Quality {score}/100 < 55 — suppressing {raw_signal}")
+                    return ScalpingSignal.HOLD
+                logger.debug(f"[SCORE GATE] Quality {score}/100 >= 55 — {raw_signal} confirmed")
+            except Exception as _e:
+                logger.debug(f"[SCORE GATE] error: {_e}")
 
         return raw_signal
 
