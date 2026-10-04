@@ -90,6 +90,8 @@ try:
     from wave30_session_lot_booster import session_lot_booster
     from wave31_reversal_detector import reversal_detector
     from wave32_gap_guard import gap_guard
+    from wave33_partial_close import partial_close_manager
+    from wave34_trailing_stop import trailing_stop_manager
     _WAVES_LOADED = True
 except Exception:
     _WAVES_LOADED = False
@@ -114,6 +116,8 @@ except Exception:
     session_lot_booster = None
     reversal_detector = None
     gap_guard = None
+    partial_close_manager = None
+    trailing_stop_manager = None
 
 
 
@@ -1015,6 +1019,24 @@ class MT5LiveTrader:
                                 except Exception as e:
                                     logger.debug(f"[MT5 SLTP ERROR] {e}")
 
+                # ── Wave 34: Enhanced Trailing Stop (module-level TrailingStopManager) ──
+                if _WAVES_LOADED and trailing_stop_manager is not None:
+                    try:
+                        _dir34 = "BUY" if pos_type == ScalpingSignal.BUY else "SELL"
+                        _new_sl34 = trailing_stop_manager.update(
+                            ticket=ticket,
+                            direction=_dir34,
+                            entry_price=pos_entry,
+                            current_price=price,
+                            current_sl=pos_sl,
+                        )
+                        if _new_sl34 is not None:
+                            pos["sl"] = _new_sl34
+                            pos_sl = _new_sl34
+                            logger.debug(f"[WAVE34] Trailing SL updated: ticket={ticket} sl={_new_sl34:.2f}")
+                    except Exception as _e34:
+                        logger.debug(f"[WAVE34] Error: {_e34}")
+
                 # ── 2. PARTIAL TAKE PROFIT AT 50% PROFIT TARGET ──
                 at_half_tp = False
                 if pos_type == ScalpingSignal.BUY:
@@ -1031,6 +1053,25 @@ class MT5LiveTrader:
                     else:
                         tp_pips_cfg = float(self.config.get("tp_pips", 45.0))
                         at_half_tp = (((pos_entry - price) / pip_size) >= 0.5 * tp_pips_cfg)
+                # ── Wave 33: Enhanced Partial Close (module-level PartialCloseManager) ──
+                if _WAVES_LOADED and partial_close_manager is not None:
+                    try:
+                        _dir33 = "BUY" if pos_type == ScalpingSignal.BUY else "SELL"
+                        _pc_trigger = partial_close_manager.check_position(
+                            ticket=ticket,
+                            direction=_dir33,
+                            entry_price=pos_entry,
+                            current_price=price,
+                            sl_price=pos_sl,
+                            tp_price=pos_tp,
+                            lot=float(pos.get("lot_size", lot_size)),
+                        )
+                        if _pc_trigger and not pos.get("partial_closed", False):
+                            # Wave 33 triggered but existing logic will handle execution below
+                            # Just mark at_half_tp True so the existing block fires
+                            at_half_tp = True
+                    except Exception as _e33:
+                        logger.debug(f"[WAVE33] Error: {_e33}")
 
                 if at_half_tp and not pos.get("partial_closed", False) and not self._partial_closes.get(ticket, False):
                     cur_lot = float(pos.get("lot_size", lot_size))
@@ -2835,6 +2876,20 @@ class MT5LiveTrader:
             if _WAVES_LOADED and gap_guard is not None:
                 try:
                     state["gap_guard"] = gap_guard.info()
+                except Exception:
+                    pass
+
+            # Wave 33: Inject partial close manager status into live_status.json
+            if _WAVES_LOADED and partial_close_manager is not None:
+                try:
+                    state["partial_close_manager"] = partial_close_manager.info()
+                except Exception:
+                    pass
+
+            # Wave 34: Inject trailing stop manager status into live_status.json
+            if _WAVES_LOADED and trailing_stop_manager is not None:
+                try:
+                    state["trailing_stop_manager"] = trailing_stop_manager.info()
                 except Exception:
                     pass
 
