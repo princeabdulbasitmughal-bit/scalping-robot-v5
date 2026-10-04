@@ -96,6 +96,10 @@ try:
     from wave36_spread_momentum import spread_momentum_guard
     from wave37_entry_cooldown import entry_cooldown
     from wave38_volatility_breaker import volatility_breaker
+    from wave39_drawdown_pause import drawdown_pause
+    from wave40_profit_target_shift import profit_target_shift
+    from wave41_session_spread_limiter import session_spread_limiter
+    from wave42_tick_volume_filter import tick_volume_filter
     _WAVES_LOADED = True
 except Exception:
     _WAVES_LOADED = False
@@ -126,6 +130,10 @@ except Exception:
     spread_momentum_guard = None
     entry_cooldown = None
     volatility_breaker = None
+    drawdown_pause = None
+    profit_target_shift = None
+    session_spread_limiter = None
+    tick_volume_filter = None
 
 
 
@@ -1350,6 +1358,12 @@ class MT5LiveTrader:
                     volatility_breaker.update(current_price)
                 except Exception:
                     pass
+            # Wave 42: Record tick arrival for tick-volume / dead-market filter
+            if _WAVES_LOADED and tick_volume_filter is not None:
+                try:
+                    tick_volume_filter.update()
+                except Exception:
+                    pass
             self.update_candles(price)
 
             # Heartbeat check (every 5 minutes)
@@ -1829,6 +1843,13 @@ class MT5LiveTrader:
                     if _WAVES_LOADED and adaptive_tp is not None:
                         try:
                             tp_pips = adaptive_tp.adjust_tp(tp_pips)
+                        except Exception:
+                            pass
+
+                    # Wave 40: Profit Target Shift — tighten TP in profit, widen in recovery
+                    if _WAVES_LOADED and profit_target_shift is not None:
+                        try:
+                            tp_pips = profit_target_shift.adjust_tp(tp_pips, getattr(self, 'daily_pnl', 0.0))
                         except Exception:
                             pass
 
@@ -2401,6 +2422,40 @@ class MT5LiveTrader:
                     return ScalpingSignal.HOLD
             except Exception as _vbe:
                 logger.debug(f"[VOLATILITY BREAKER] Error: {_vbe}")
+
+        # ── Wave 39: Drawdown Pause (equity drop > 1.5% in 30min → 15min pause) ─
+        if _WAVES_LOADED and drawdown_pause is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                drawdown_pause.update(self.equity)
+                if drawdown_pause.is_entry_blocked():
+                    logger.warning("[DRAWDOWN PAUSE] Blocked: recent equity drawdown > 1.5%")
+                    return ScalpingSignal.HOLD
+            except Exception as _dp39e:
+                logger.debug(f"[DRAWDOWN PAUSE] Error: {_dp39e}")
+
+        # ── Wave 40: Profit Target Shift (adjusts TP factor based on daily PnL) ─
+        # (No gate block — this is an advisory module used during TP calculation)
+
+        # ── Wave 41: Session Spread Limiter (Tokyo/London-pre spread guard) ──────
+        if _WAVES_LOADED and session_spread_limiter is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                _cur_sp = getattr(self, '_last_spread_pips', 0.0)
+                if session_spread_limiter.is_entry_blocked(_cur_sp):
+                    logger.debug(
+                        f"[SESSION SPREAD LIMITER] Blocked: spread={_cur_sp:.2f} too wide for current session"
+                    )
+                    return ScalpingSignal.HOLD
+            except Exception as _ssl41e:
+                logger.debug(f"[SESSION SPREAD LIMITER] Error: {_ssl41e}")
+
+        # ── Wave 42: Tick Volume Filter (dead-market detection) ─────────────────
+        if _WAVES_LOADED and tick_volume_filter is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if tick_volume_filter.is_entry_blocked():
+                    logger.debug("[TICK VOLUME FILTER] Blocked: dead market — insufficient tick velocity")
+                    return ScalpingSignal.HOLD
+            except Exception as _tvf42e:
+                logger.debug(f"[TICK VOLUME FILTER] Error: {_tvf42e}")
 
         # ── Wave 26: Time Filter (scheduled release window) ───────────────────
         if _WAVES_LOADED and wave26_time_filter is not None and raw_signal != ScalpingSignal.HOLD:
@@ -3006,6 +3061,34 @@ class MT5LiveTrader:
             if _WAVES_LOADED and volatility_breaker is not None:
                 try:
                     state["volatility_breaker"] = volatility_breaker.info()
+                except Exception:
+                    pass
+
+            # Wave 39: Inject drawdown pause status
+            if _WAVES_LOADED and drawdown_pause is not None:
+                try:
+                    state["drawdown_pause"] = drawdown_pause.info()
+                except Exception:
+                    pass
+
+            # Wave 40: Inject profit target shift status
+            if _WAVES_LOADED and profit_target_shift is not None:
+                try:
+                    state["profit_target_shift"] = profit_target_shift.info()
+                except Exception:
+                    pass
+
+            # Wave 41: Inject session spread limiter status
+            if _WAVES_LOADED and session_spread_limiter is not None:
+                try:
+                    state["session_spread_limiter"] = session_spread_limiter.info()
+                except Exception:
+                    pass
+
+            # Wave 42: Inject tick volume filter status
+            if _WAVES_LOADED and tick_volume_filter is not None:
+                try:
+                    state["tick_volume_filter"] = tick_volume_filter.info()
                 except Exception:
                     pass
 
