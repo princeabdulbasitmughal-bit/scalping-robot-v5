@@ -108,6 +108,11 @@ try:
     from wave48_equity_high_watermark import equity_high_watermark
     from wave49_spread_cost_tracker import spread_cost_tracker
     from wave50_candle_pattern_filter import candle_pattern_filter
+    from wave51_session_pnl_tracker import session_pnl_tracker
+    from wave52_rsi_ob_os_filter import rsi_ob_os_filter
+    from wave53_tick_reversal_guard import tick_reversal_guard
+    from wave54_max_spread_per_trade import max_spread_per_trade
+    from wave55_balance_floor_guard import balance_floor_guard
     _WAVES_LOADED = True
 except Exception:
     _WAVES_LOADED = False
@@ -150,6 +155,11 @@ except Exception:
     equity_high_watermark = None
     spread_cost_tracker = None
     candle_pattern_filter = None
+    session_pnl_tracker = None
+    rsi_ob_os_filter = None
+    tick_reversal_guard = None
+    max_spread_per_trade = None
+    balance_floor_guard = None
 
 
 
@@ -1324,6 +1334,13 @@ class MT5LiveTrader:
                         except Exception:
                             pass
 
+                    # Wave 51: Record closed trade PnL into current session bucket
+                    if _WAVES_LOADED and session_pnl_tracker is not None:
+                        try:
+                            session_pnl_tracker.record_trade(pnl)
+                        except Exception:
+                            pass
+
                 else:
                     remaining_positions.append(pos)
 
@@ -1427,6 +1444,31 @@ class MT5LiveTrader:
             if _WAVES_LOADED and candle_pattern_filter is not None:
                 try:
                     candle_pattern_filter.update(current_price)
+                except Exception:
+                    pass
+            # Wave 52: Feed current price to RSI overbought/oversold filter
+            if _WAVES_LOADED and rsi_ob_os_filter is not None:
+                try:
+                    rsi_ob_os_filter.update(current_price)
+                except Exception:
+                    pass
+            # Wave 53: Feed current price to tick reversal guard
+            if _WAVES_LOADED and tick_reversal_guard is not None:
+                try:
+                    tick_reversal_guard.update(current_price)
+                except Exception:
+                    pass
+            # Wave 54: Feed current spread to max spread per trade guard
+            if _WAVES_LOADED and max_spread_per_trade is not None:
+                try:
+                    _spread54 = getattr(self, '_last_spread_pips', 0.0)
+                    max_spread_per_trade.update(_spread54)
+                except Exception:
+                    pass
+            # Wave 55: Feed current balance to balance floor guard
+            if _WAVES_LOADED and balance_floor_guard is not None:
+                try:
+                    balance_floor_guard.update(self.balance)
                 except Exception:
                     pass
             self.update_candles(price)
@@ -2586,6 +2628,54 @@ class MT5LiveTrader:
             except Exception as _sct49e:
                 logger.debug(f"[SPREAD COST] Error: {_sct49e}")
 
+        # ── Wave 51: Session PnL Tracker (session loss limit) ─────────────────────
+        if _WAVES_LOADED and session_pnl_tracker is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if session_pnl_tracker.is_entry_blocked():
+                    logger.info("[SESSION PNL] Blocked: current session exceeded loss limit")
+                    return ScalpingSignal.HOLD
+            except Exception as _spt51e:
+                logger.debug(f"[SESSION PNL] Error: {_spt51e}")
+
+        # ── Wave 52: RSI Overbought/Oversold Filter ────────────────────────────────
+        if _WAVES_LOADED and rsi_ob_os_filter is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                _sig_str52 = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
+                if rsi_ob_os_filter.is_signal_blocked(_sig_str52):
+                    _rsi_val = rsi_ob_os_filter.get_rsi()
+                    logger.info(f"[RSI FILTER] Blocked: RSI={_rsi_val:.1f} at extreme level for {_sig_str52}")
+                    return ScalpingSignal.HOLD
+            except Exception as _rsi52e:
+                logger.debug(f"[RSI FILTER] Error: {_rsi52e}")
+
+        # ── Wave 53: Tick Reversal Guard (momentum reversal detection) ─────────────
+        if _WAVES_LOADED and tick_reversal_guard is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                _sig_str53 = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
+                if tick_reversal_guard.is_signal_blocked(_sig_str53):
+                    logger.info(f"[TICK REVERSAL] Blocked: consecutive adverse ticks detected for {_sig_str53}")
+                    return ScalpingSignal.HOLD
+            except Exception as _trg53e:
+                logger.debug(f"[TICK REVERSAL] Error: {_trg53e}")
+
+        # ── Wave 54: Max Spread Per Trade ──────────────────────────────────────────
+        if _WAVES_LOADED and max_spread_per_trade is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if max_spread_per_trade.is_entry_blocked():
+                    logger.info(f"[SPREAD CAP] Blocked: live spread {max_spread_per_trade.get_spread():.2f} pips exceeds per-trade cap")
+                    return ScalpingSignal.HOLD
+            except Exception as _msp54e:
+                logger.debug(f"[SPREAD CAP] Error: {_msp54e}")
+
+        # ── Wave 55: Balance Floor Guard (hard stop below floor) ───────────────────
+        if _WAVES_LOADED and balance_floor_guard is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if balance_floor_guard.is_entry_blocked():
+                    logger.info("[BALANCE FLOOR] Blocked: balance below minimum floor — all trading halted")
+                    return ScalpingSignal.HOLD
+            except Exception as _bfg55e:
+                logger.debug(f"[BALANCE FLOOR] Error: {_bfg55e}")
+
         # ── Wave 26: Time Filter (scheduled release window) ───────────────────
         if _WAVES_LOADED and wave26_time_filter is not None and raw_signal != ScalpingSignal.HOLD:
             try:
@@ -3280,6 +3370,41 @@ class MT5LiveTrader:
             if _WAVES_LOADED and candle_pattern_filter is not None:
                 try:
                     state["candle_pattern_filter"] = candle_pattern_filter.info()
+                except Exception:
+                    pass
+
+            # Wave 51: Inject session PnL tracker status
+            if _WAVES_LOADED and session_pnl_tracker is not None:
+                try:
+                    state["session_pnl_tracker"] = session_pnl_tracker.info()
+                except Exception:
+                    pass
+
+            # Wave 52: Inject RSI overbought/oversold filter status
+            if _WAVES_LOADED and rsi_ob_os_filter is not None:
+                try:
+                    state["rsi_ob_os_filter"] = rsi_ob_os_filter.info()
+                except Exception:
+                    pass
+
+            # Wave 53: Inject tick reversal guard status
+            if _WAVES_LOADED and tick_reversal_guard is not None:
+                try:
+                    state["tick_reversal_guard"] = tick_reversal_guard.info()
+                except Exception:
+                    pass
+
+            # Wave 54: Inject max spread per trade status
+            if _WAVES_LOADED and max_spread_per_trade is not None:
+                try:
+                    state["max_spread_per_trade"] = max_spread_per_trade.info()
+                except Exception:
+                    pass
+
+            # Wave 55: Inject balance floor guard status
+            if _WAVES_LOADED and balance_floor_guard is not None:
+                try:
+                    state["balance_floor_guard"] = balance_floor_guard.info()
                 except Exception:
                     pass
 
