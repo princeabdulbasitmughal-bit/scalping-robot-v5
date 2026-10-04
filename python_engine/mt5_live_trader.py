@@ -82,6 +82,10 @@ try:
     from wave22_equity_curve_halt import equity_curve_halt
     from wave23_spread_optimizer import spread_optimizer as wave23_spread_optimizer
     from wave24_daily_profit_lock import daily_profit_lock
+    from wave25_drawdown_accelerator import drawdown_accelerator
+    from wave26_time_filter import time_filter as wave26_time_filter
+    from wave27_correlation_guard import correlation_guard
+    from wave28_momentum_confirmation import momentum_confirmation
     _WAVES_LOADED = True
 except Exception:
     _WAVES_LOADED = False
@@ -98,6 +102,10 @@ except Exception:
     equity_curve_halt = None
     wave23_spread_optimizer = None
     daily_profit_lock = None
+    drawdown_accelerator = None
+    wave26_time_filter = None
+    correlation_guard = None
+    momentum_confirmation = None
 
 
 LOG_DIR = Path(__file__).resolve().parent.parent
@@ -1167,6 +1175,13 @@ class MT5LiveTrader:
                         except Exception:
                             pass
 
+                    # Wave 25: record result for drawdown accelerator lot scaling
+                    if _WAVES_LOADED and drawdown_accelerator is not None:
+                        try:
+                            drawdown_accelerator.record_trade(pnl >= 0)
+                        except Exception:
+                            pass
+
                     # Wave 12: Telegram trade close alert
                     if _WAVES_LOADED and telegram_alerter is not None:
                         try:
@@ -1213,6 +1228,12 @@ class MT5LiveTrader:
             self._price_1min.append(current_price)
             self._price_5min.append(current_price)
             self._price_15min.append(current_price)
+            # Wave 28: Update momentum confirmation price buffer
+            if _WAVES_LOADED and momentum_confirmation is not None:
+                try:
+                    momentum_confirmation.update_price(current_price)
+                except Exception:
+                    pass
             self.update_candles(price)
 
             # Heartbeat check (every 5 minutes)
@@ -1895,6 +1916,19 @@ class MT5LiveTrader:
             except Exception:
                 pass
 
+        # Wave 25: Drawdown Accelerator — reduce lot on consecutive losses
+        if _WAVES_LOADED and drawdown_accelerator is not None:
+            try:
+                actual_lot = drawdown_accelerator.apply_lot(actual_lot)
+                mult = drawdown_accelerator.get_multiplier()
+                if mult < 1.0:
+                    logger.debug(
+                        "[WAVE25] Lot scaled to %.3f (multiplier=%.2f, consec_losses=%d)",
+                        actual_lot, mult, drawdown_accelerator.info().get("consec_losses", 0)
+                    )
+            except Exception:
+                pass
+
         lot = max(0.01, min(actual_lot, max_lot_size))
         return round(lot, 2)
 
@@ -2179,6 +2213,39 @@ class MT5LiveTrader:
                     return ScalpingSignal.HOLD
             except Exception as _eqe:
                 logger.debug(f"[EQ HALT] Error: {_eqe}")
+
+        # ── Wave 26: Time Filter (scheduled release window) ───────────────────
+        if _WAVES_LOADED and wave26_time_filter is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                _tf_ok, _tf_reason = wave26_time_filter.is_trading_allowed()
+                if not _tf_ok:
+                    logger.info(f"[TIME FILTER] Blocked: {_tf_reason}")
+                    return ScalpingSignal.HOLD
+            except Exception as _tfe:
+                logger.debug(f"[TIME FILTER] Error: {_tfe}")
+
+        # ── Wave 27: Correlation Guard (choppy market burst detection) ─────────
+        if _WAVES_LOADED and correlation_guard is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                # Record this signal so the guard can track density
+                correlation_guard.record_signal()
+                _cg_ok, _cg_reason = correlation_guard.is_trading_allowed()
+                if not _cg_ok:
+                    logger.warning(f"[CORR GUARD] Blocked: {_cg_reason}")
+                    return ScalpingSignal.HOLD
+            except Exception as _cge:
+                logger.debug(f"[CORR GUARD] Error: {_cge}")
+
+        # ── Wave 28: Momentum Confirmation (ticks must move in signal direction) ─
+        if _WAVES_LOADED and momentum_confirmation is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                _sig_str = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
+                _mom_ok, _mom_reason = momentum_confirmation.is_momentum_confirmed(_sig_str)
+                if not _mom_ok:
+                    logger.debug(f"[MOMENTUM] Blocked: {_mom_reason}")
+                    return ScalpingSignal.HOLD
+            except Exception as _mome:
+                logger.debug(f"[MOMENTUM] Error: {_mome}")
 
         # ── Wave 10: Session Quality Gate ────────────────────────────────────
         if _WAVES_LOADED and session_optimizer is not None:
@@ -2642,6 +2709,34 @@ class MT5LiveTrader:
             if _WAVES_LOADED and daily_profit_lock is not None:
                 try:
                     state["daily_profit_lock"] = daily_profit_lock.info()
+                except Exception:
+                    pass
+
+            # Wave 25: Inject drawdown accelerator status into live_status.json
+            if _WAVES_LOADED and drawdown_accelerator is not None:
+                try:
+                    state["drawdown_accelerator"] = drawdown_accelerator.info()
+                except Exception:
+                    pass
+
+            # Wave 26: Inject time filter status into live_status.json
+            if _WAVES_LOADED and wave26_time_filter is not None:
+                try:
+                    state["time_filter"] = wave26_time_filter.info()
+                except Exception:
+                    pass
+
+            # Wave 27: Inject correlation guard status into live_status.json
+            if _WAVES_LOADED and correlation_guard is not None:
+                try:
+                    state["correlation_guard"] = correlation_guard.info()
+                except Exception:
+                    pass
+
+            # Wave 28: Inject momentum confirmation status into live_status.json
+            if _WAVES_LOADED and momentum_confirmation is not None:
+                try:
+                    state["momentum_confirmation"] = momentum_confirmation.info()
                 except Exception:
                     pass
 
