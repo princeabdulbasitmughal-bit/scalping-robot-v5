@@ -100,6 +100,10 @@ try:
     from wave40_profit_target_shift import profit_target_shift
     from wave41_session_spread_limiter import session_spread_limiter
     from wave42_tick_volume_filter import tick_volume_filter
+    from wave43_win_rate_guard import win_rate_guard
+    from wave44_price_velocity_filter import price_velocity_filter
+    from wave45_london_open_booster import london_open_booster
+    from wave46_lot_recovery_ladder import lot_recovery_ladder
     _WAVES_LOADED = True
 except Exception:
     _WAVES_LOADED = False
@@ -134,6 +138,10 @@ except Exception:
     profit_target_shift = None
     session_spread_limiter = None
     tick_volume_filter = None
+    win_rate_guard = None
+    price_velocity_filter = None
+    london_open_booster = None
+    lot_recovery_ladder = None
 
 
 
@@ -1285,6 +1293,20 @@ class MT5LiveTrader:
                         except Exception:
                             pass
 
+                    # Wave 43: Record trade result for win-rate guard
+                    if _WAVES_LOADED and win_rate_guard is not None:
+                        try:
+                            win_rate_guard.record_trade(won=(pnl >= 0))
+                        except Exception:
+                            pass
+
+                    # Wave 46: Record trade result for lot recovery ladder
+                    if _WAVES_LOADED and lot_recovery_ladder is not None:
+                        try:
+                            lot_recovery_ladder.record_trade(won=(pnl >= 0))
+                        except Exception:
+                            pass
+
                 else:
                     remaining_positions.append(pos)
 
@@ -1364,7 +1386,14 @@ class MT5LiveTrader:
                     tick_volume_filter.update()
                 except Exception:
                     pass
+            # Wave 44: Feed current price for velocity tracking (chasing prevention)
+            if _WAVES_LOADED and price_velocity_filter is not None:
+                try:
+                    price_velocity_filter.update(current_price)
+                except Exception:
+                    pass
             self.update_candles(price)
+
 
             # Heartbeat check (every 5 minutes)
             self._check_heartbeat()
@@ -2088,6 +2117,14 @@ class MT5LiveTrader:
             except Exception:
                 pass
 
+        # Wave 46: Lot Recovery Ladder — scale lot after consecutive losses
+        if _WAVES_LOADED and lot_recovery_ladder is not None:
+            try:
+                actual_lot = lot_recovery_ladder.get_lot(actual_lot)
+                actual_lot = min(actual_lot, max_lot_size)
+            except Exception:
+                pass
+
         lot = max(0.01, min(actual_lot, max_lot_size))
         return round(lot, 2)
 
@@ -2457,6 +2494,24 @@ class MT5LiveTrader:
             except Exception as _tvf42e:
                 logger.debug(f"[TICK VOLUME FILTER] Error: {_tvf42e}")
 
+        # ── Wave 43: Win Rate Guard (losing streak pause) ────────────────────────
+        if _WAVES_LOADED and win_rate_guard is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if win_rate_guard.is_entry_blocked():
+                    logger.info("[WIN RATE GUARD] Blocked: win rate too low — losing streak pause")
+                    return ScalpingSignal.HOLD
+            except Exception as _wrg43e:
+                logger.debug(f"[WIN RATE GUARD] Error: {_wrg43e}")
+
+        # ── Wave 44: Price Velocity Filter (chasing prevention) ─────────────────
+        if _WAVES_LOADED and price_velocity_filter is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if price_velocity_filter.is_entry_blocked():
+                    logger.info("[PRICE VELOCITY] Blocked: price moving too fast — chasing prevention")
+                    return ScalpingSignal.HOLD
+            except Exception as _pvf44e:
+                logger.debug(f"[PRICE VELOCITY] Error: {_pvf44e}")
+
         # ── Wave 26: Time Filter (scheduled release window) ───────────────────
         if _WAVES_LOADED and wave26_time_filter is not None and raw_signal != ScalpingSignal.HOLD:
             try:
@@ -2530,6 +2585,12 @@ class MT5LiveTrader:
                 if _WAVES_LOADED and daily_profit_lock is not None:
                     try:
                         _min_score = daily_profit_lock.get_min_score(55)
+                    except Exception:
+                        pass
+                # Wave 45: London Open Booster — reduce min_score during London open spike
+                if _WAVES_LOADED and london_open_booster is not None:
+                    try:
+                        _min_score = london_open_booster.adjust_min_score(_min_score)
                     except Exception:
                         pass
                 if score < _min_score:
@@ -3089,6 +3150,34 @@ class MT5LiveTrader:
             if _WAVES_LOADED and tick_volume_filter is not None:
                 try:
                     state["tick_volume_filter"] = tick_volume_filter.info()
+                except Exception:
+                    pass
+
+            # Wave 43: Inject win rate guard status
+            if _WAVES_LOADED and win_rate_guard is not None:
+                try:
+                    state["win_rate_guard"] = win_rate_guard.info()
+                except Exception:
+                    pass
+
+            # Wave 44: Inject price velocity filter status
+            if _WAVES_LOADED and price_velocity_filter is not None:
+                try:
+                    state["price_velocity_filter"] = price_velocity_filter.info()
+                except Exception:
+                    pass
+
+            # Wave 45: Inject London open booster status
+            if _WAVES_LOADED and london_open_booster is not None:
+                try:
+                    state["london_open_booster"] = london_open_booster.info()
+                except Exception:
+                    pass
+
+            # Wave 46: Inject lot recovery ladder status
+            if _WAVES_LOADED and lot_recovery_ladder is not None:
+                try:
+                    state["lot_recovery_ladder"] = lot_recovery_ladder.info()
                 except Exception:
                     pass
 

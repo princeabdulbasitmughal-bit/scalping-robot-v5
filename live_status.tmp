@@ -1,0 +1,102 @@
+{
+  "status": "ACTIVE_SCALPING",
+  "account_mode": "DEMO_ACCOUNT",
+  "broker_name": "MetaQuotes-Demo / Institutional Liquidity",
+  "account_id": "DEMO-889901-MT5",
+  "leverage": "1:500",
+  "currency": "USD",
+  "symbol": "XAUUSD",
+  "current_price": 2414.19,
+  "balance": 9100.0,
+  "equity": 9100.0,
+  "margin_free": 9100.0,
+  "daily_pnl": -900.0,
+  "daily_loss": 900.0,
+  "daily_trades": 3,
+  "trading_halted": true,
+  "open_positions": [],
+  "open_positions_count": 0,
+  "total_trades": 3,
+  "win_rate_pct": 0.0,
+  "last_trades": [
+    {
+      "timestamp": "2026-10-04T03:49:06.447285Z",
+      "direction": "SELL",
+      "entry_price": 2400.32,
+      "exit_price": 2403.32,
+      "pnl": -300.0,
+      "exit_reason": "SL_HIT"
+    },
+    {
+      "timestamp": "2026-10-04T05:49:10.024359Z",
+      "direction": "SELL",
+      "entry_price": 2400.45,
+      "exit_price": 2406.5,
+      "pnl": -300.0,
+      "exit_reason": "SL_HIT"
+    },
+    {
+      "timestamp": "2026-10-04T05:49:10.025364Z",
+      "direction": "SELL",
+      "entry_price": 2403.32,
+      "exit_price": 2406.5,
+      "pnl": -300.0,
+      "exit_reason": "SL_HIT"
+    }
+  ],
+  "consecutive_losses": 3,
+  "daily_wins": 0,
+  "daily_losses": 3,
+  "last_signal": "SELL",
+  "spread_pips": 1.7,
+  "rolling_spread_ema": 1.55,
+  "dynamic_slippage_points": 14,
+  "mt5_connected": false,
+  "broker_login": "DEMO-889901-MT5",
+  "broker_server": "MetaQuotes-Demo",
+  "recent_trades": [
+    {
+      "id": "trade-1791084575948",
+      "direction": "SELL",
+      "type": "SELL",
+      "entry": 2400.32,
+      "exit": 2403.32,
+      "pnl": -300.0,
+      "result": "LOSS",
+      "close_time": "2026-10-04T03:49:06.447285Z"
+    },
+    {
+      "id": "trade-1791084606724",
+      "direction": "SELL",
+      "type": "SELL",
+      "entry": 2400.45,
+      "exit": 2406.5,
+      "pnl": -300.0,
+      "result": "LOSS",
+      "close_time": "2026-10-04T05:49:10.024359Z"
+    },
+    {
+      "id": "trade-1791085746448",
+      "direction": "SELL",
+      "type": "SELL",
+      "entry": 2403.32,
+      "exit": 2406.5,
+      "pnl": -300.0,
+      "result": "LOSS",
+      "close_time": "2026-10-04T05:49:10.025364Z"
+    }
+  ],
+  "latency_metrics": {
+    "tick_to_signal_us": 74.0,
+    "signal_to_dispatch_us": 304.1,
+    "order_execution_ms": 0.0,
+    "total_fill_latency_ms": 0.0,
+    "avg_tick_loop_us": 638657.14,
+    "ticks_processed": 33564,
+    "last_slippage_pips": 0.0,
+    "avg_slippage_pips": 0.0,
+    "dynamic_slippage_points": 14
+  },
+  "updated_at": "2026-10-04T13:44:16.704116Z",
+  "tunnel_url": "https://afe064e87e41b4a6-111-68-99-197.serveousercontent.com"
+}
