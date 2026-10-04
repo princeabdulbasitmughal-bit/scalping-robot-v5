@@ -62,7 +62,7 @@ except ImportError as e:
     from storage import atomic_write_json, safe_read_json
 
 # ---------------------------------------------------------------------------
-# Wave 8-12 optional module imports (safe fallback if files missing)
+# Wave 8-14 optional module imports (safe fallback if files missing)
 # ---------------------------------------------------------------------------
 _WAVES_ROOT = str(Path(__file__).resolve().parent.parent)
 if _WAVES_ROOT not in sys.path:
@@ -74,6 +74,8 @@ try:
     from wave10_session_optimizer import session_optimizer
     from wave11_profit_optimizer import profit_optimizer
     from wave12_telegram_alerts import telegram_alerter
+    from wave13_ml_predictor import ml_predictor
+    from wave14_auto_tuner import auto_tuner
     _WAVES_LOADED = True
 except Exception:
     _WAVES_LOADED = False
@@ -82,6 +84,8 @@ except Exception:
     session_optimizer = None
     profit_optimizer = None
     telegram_alerter = None
+    ml_predictor = None
+    auto_tuner = None
 
 LOG_DIR = Path(__file__).resolve().parent.parent
 TRADER_LOG_FILE = LOG_DIR / "trader.log"
@@ -836,6 +840,21 @@ class MT5LiveTrader:
             logger.info(f"[ANALYTICS] Wrote analytics.json after {self._trades_closed_count} trades.")
         except Exception as exc:
             logger.error(f"[ANALYTICS ERROR] Failed to write analytics.json: {exc}", exc_info=True)
+
+        # ── Wave 14: Auto-tune config parameters from trade history ──────────
+        if _WAVES_LOADED and auto_tuner is not None:
+            try:
+                last_tune = getattr(self, "_last_auto_tune_time", 0)
+                if len(self.trade_history) >= 10 and (time.time() - last_tune) > 3600:
+                    _cfg_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
+                    report = auto_tuner.analyse_and_tune(
+                        self.trade_history, self.balance,
+                        config_path=_cfg_path, dry_run=False
+                    )
+                    self._last_auto_tune_time = time.time()
+                    logger.info(f"[AUTO-TUNE] Ran: {report.get('summary', 'done')}")
+            except Exception as _e:
+                logger.debug(f"[AUTO-TUNE] error: {_e}")
 
     def log_heartbeat(self, force: bool = False):
         """Log system heartbeat every 5 minutes: 'HEARTBEAT | balance=$X equity=$X positions=N signal=X'."""
@@ -2066,6 +2085,25 @@ class MT5LiveTrader:
                 logger.debug(f"[SCORE GATE] Quality {score}/100 >= 55 — {raw_signal} confirmed")
             except Exception as _e:
                 logger.debug(f"[SCORE GATE] error: {_e}")
+
+        # ── Wave 13: ML price direction agreement gate ──────────────────────
+        if _WAVES_LOADED and ml_predictor is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                closes_list_ml = [float(b.get("close", self.current_price)) for b in list(self.bars)[-25:] if isinstance(b, dict)]
+                if len(closes_list_ml) >= 5:
+                    ml_result = ml_predictor.predict_signal_agreement(closes_list_ml, raw_signal)
+                    if not ml_result.get("agree", True) and ml_result.get("confidence", 0) >= 60:
+                        logger.debug(
+                            f"[ML GATE] ML disagrees: dir={ml_result['direction']} "
+                            f"conf={ml_result['confidence']}% -- suppressing {raw_signal}"
+                        )
+                        return ScalpingSignal.HOLD
+                    logger.debug(
+                        f"[ML OK] dir={ml_result.get('direction','?')} "
+                        f"conf={ml_result.get('confidence',0)}% boost={ml_result.get('boost',1.0):.2f}"
+                    )
+            except Exception as _e:
+                logger.debug(f"[ML GATE] error: {_e}")
 
         return raw_signal
 
