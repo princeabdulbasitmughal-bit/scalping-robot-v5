@@ -76,6 +76,8 @@ try:
     from wave12_telegram_alerts import telegram_alerter
     from wave13_ml_predictor import ml_predictor
     from wave14_auto_tuner import auto_tuner
+    from wave19_volatility_tpsl import vol_tpsl_adjuster
+    from wave20_spike_filter import spike_filter
     _WAVES_LOADED = True
 except Exception:
     _WAVES_LOADED = False
@@ -86,6 +88,8 @@ except Exception:
     telegram_alerter = None
     ml_predictor = None
     auto_tuner = None
+    vol_tpsl_adjuster = None
+    spike_filter = None
 
 LOG_DIR = Path(__file__).resolve().parent.parent
 TRADER_LOG_FILE = LOG_DIR / "trader.log"
@@ -1630,6 +1634,18 @@ class MT5LiveTrader:
                     # so editing either "sl_pips" or "rr_ratio" in config adjusts both automatically.
                     sl_pips = float(self.config.get("sl_pips", 30.0))
                     tp_pips = sl_pips * float(self.config.get("rr_ratio", 1.5))  # dynamic: 30 * 1.5 = 45 pips
+
+                    # Wave 19: Volatility-adjusted TP/SL
+                    if _WAVES_LOADED and vol_tpsl_adjuster is not None:
+                        try:
+                            _closes_vol = [float(b.get("close", self.current_price)) for b in list(self.bars)[-20:] if isinstance(b, dict)]
+                            _sess_info = session_optimizer.get_current_session_info() if session_optimizer else {}
+                            tp_pips, sl_pips = vol_tpsl_adjuster.adjusted_tpsl(
+                                _closes_vol, tp_pips, sl_pips, _sess_info
+                            )
+                        except Exception:
+                            pass
+
                     sl = round(price - (sl_pips * pip_size) if signal == ScalpingSignal.BUY else price + (sl_pips * pip_size), self.digits)
                     tp = round(price + (tp_pips * pip_size) if signal == ScalpingSignal.BUY else price - (tp_pips * pip_size), self.digits)
 
@@ -1806,6 +1822,28 @@ class MT5LiveTrader:
         elif current_drawdown_pct > 3.0:
             actual_lot *= 0.5
             logger.debug(f"[DRAWDOWN REDUCTION] DD={current_drawdown_pct:.1f}% lot scaled to {actual_lot:.3f}")
+
+        # Wave 18: Streak modifier from Wave 11 profit_optimizer
+        if _WAVES_LOADED and profit_optimizer is not None:
+            try:
+                streak_scale = profit_optimizer.streak_lot_modifier()
+                if streak_scale != 1.0:
+                    actual_lot *= streak_scale
+                    logger.debug(f"[STREAK MODIFIER] scale={streak_scale:.2f} lot={actual_lot:.3f}")
+            except Exception:
+                pass
+
+        # Wave 18: Session volatility scaling
+        try:
+            if _WAVES_LOADED and session_optimizer is not None:
+                sess_info = session_optimizer.get_current_session_info()
+                vol_idx = float(sess_info.get("vol_index", 1.0))
+                if vol_idx >= 1.5:
+                    actual_lot = min(actual_lot * 1.1, max_lot_size)
+                elif vol_idx <= 0.5:
+                    actual_lot *= 0.75
+        except Exception:
+            pass
 
         lot = max(0.01, min(actual_lot, max_lot_size))
         return round(lot, 2)
@@ -2054,6 +2092,22 @@ class MT5LiveTrader:
             logger.debug(f"[SIGNAL FIRED] {tier_hit} | MACD hist={macd_hist:.4f} regime={self._market_regime} ema_cross={self._ema_cross_signal} -> {raw_signal}")
         else:
             logger.debug(f"[SIGNAL FIRED] {tier_hit} | MACD skipped regime={self._market_regime} ema_cross={self._ema_cross_signal} -> {raw_signal}")
+
+        # ── Wave 20: Spike / Flash-Move Filter ───────────────────────────────
+        if _WAVES_LOADED and spike_filter is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                bars_list = list(self.bars)
+                _prev_price = (
+                    float(bars_list[-2].get("close", self.current_price))
+                    if len(bars_list) >= 2 and isinstance(bars_list[-2], dict)
+                    else self.current_price
+                )
+                _spike_ok, _spike_reason = spike_filter.check(self.current_price, _prev_price)
+                if not _spike_ok:
+                    logger.debug(f"[SPIKE FILTER] Blocked: {_spike_reason}")
+                    return ScalpingSignal.HOLD
+            except Exception as _se:
+                logger.debug(f"[SPIKE FILTER] Error: {_se}")
 
         # ── Wave 10: Session Quality Gate ────────────────────────────────────
         if _WAVES_LOADED and session_optimizer is not None:
@@ -2475,6 +2529,13 @@ class MT5LiveTrader:
                     if len(closes_ml) >= 5:
                         ml_pred = ml_predictor.predict(closes_ml)
                         state["ml_prediction"] = ml_pred
+                except Exception:
+                    pass
+
+            # Wave 20: Inject spike filter status into live_status.json
+            if _WAVES_LOADED and spike_filter is not None:
+                try:
+                    state["spike_filter"] = spike_filter.info()
                 except Exception:
                     pass
 
