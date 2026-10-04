@@ -92,6 +92,10 @@ try:
     from wave32_gap_guard import gap_guard
     from wave33_partial_close import partial_close_manager
     from wave34_trailing_stop import trailing_stop_manager
+    from wave35_overnight_guard import overnight_guard
+    from wave36_spread_momentum import spread_momentum_guard
+    from wave37_entry_cooldown import entry_cooldown
+    from wave38_volatility_breaker import volatility_breaker
     _WAVES_LOADED = True
 except Exception:
     _WAVES_LOADED = False
@@ -118,6 +122,11 @@ except Exception:
     gap_guard = None
     partial_close_manager = None
     trailing_stop_manager = None
+    overnight_guard = None
+    spread_momentum_guard = None
+    entry_cooldown = None
+    volatility_breaker = None
+
 
 
 
@@ -943,6 +952,17 @@ class MT5LiveTrader:
             lot_size = self._get_dynamic_lot(self.balance)
 
         with self._lock:
+            # Wave 35: OvernightGuard - force-close all positions on Fri 20:30+ UTC / weekends
+            if _WAVES_LOADED and overnight_guard is not None:
+                try:
+                    if overnight_guard.should_force_close_all() and self.open_positions:
+                        logger.warning("[OVERNIGHT GUARD] Force-closing ALL positions: weekend/overnight gap risk")
+                        for _og_pos in self.open_positions:
+                            _og_pos["sl"] = self.current_price  # set SL = current price → triggers close next evaluation
+                            _og_pos["close_reason"] = "OVERNIGHT_GUARD"
+                except Exception as _oge:
+                    logger.debug(f"[OVERNIGHT GUARD] Force-close check error: {_oge}")
+
             remaining_positions = []
             for pos in self.open_positions:
                 closed = False
@@ -1242,6 +1262,21 @@ class MT5LiveTrader:
                         except Exception:
                             pass
 
+                    # Wave 37: Record trade close for entry cooldown (60s win / 120s loss)
+                    if _WAVES_LOADED and entry_cooldown is not None:
+                        try:
+                            entry_cooldown.record_trade_close(was_win=(pnl >= 0), pnl=pnl)
+                        except Exception:
+                            pass
+
+                    # Wave 34: Clean up trailing stop tracker on position close
+                    if _WAVES_LOADED and trailing_stop_manager is not None:
+                        try:
+                            _tc_ticket = pos.get("ticket", id(pos))
+                            trailing_stop_manager.close_ticket(_tc_ticket)
+                        except Exception:
+                            pass
+
                 else:
                     remaining_positions.append(pos)
 
@@ -1300,6 +1335,19 @@ class MT5LiveTrader:
             if _WAVES_LOADED and gap_guard is not None:
                 try:
                     gap_guard.update_price(current_price)
+                except Exception:
+                    pass
+            # Wave 36: Feed spread momentum guard
+            if _WAVES_LOADED and spread_momentum_guard is not None:
+                try:
+                    _cur_spread = getattr(self, '_last_spread_pips', 0.0)
+                    spread_momentum_guard.update(_cur_spread)
+                except Exception:
+                    pass
+            # Wave 38: Feed volatility breaker price buffer
+            if _WAVES_LOADED and volatility_breaker is not None:
+                try:
+                    volatility_breaker.update(current_price)
                 except Exception:
                     pass
             self.update_candles(price)
@@ -2314,6 +2362,46 @@ class MT5LiveTrader:
             except Exception as _gge:
                 logger.debug(f"[GAP GUARD] Error: {_gge}")
 
+        # ── Wave 35: Overnight Guard (Friday close + rollover block) ──────────
+        if _WAVES_LOADED and overnight_guard is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if overnight_guard.is_entry_blocked():
+                    _og_reason = overnight_guard.get_reason()
+                    logger.warning(f"[OVERNIGHT GUARD] Blocked: {_og_reason}")
+                    return ScalpingSignal.HOLD
+            except Exception as _oge:
+                logger.debug(f"[OVERNIGHT GUARD] Error: {_oge}")
+
+        # ── Wave 36: Spread Momentum Guard (3x spread widening → 60s block) ──
+        if _WAVES_LOADED and spread_momentum_guard is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if spread_momentum_guard.is_entry_blocked():
+                    _smg_secs = spread_momentum_guard.seconds_remaining()
+                    logger.warning(f"[SPREAD MOMENTUM] Blocked: spread spike — {_smg_secs:.0f}s remaining")
+                    return ScalpingSignal.HOLD
+            except Exception as _smge:
+                logger.debug(f"[SPREAD MOMENTUM] Error: {_smge}")
+
+        # ── Wave 37: Entry Cooldown (post-trade cooldown) ────────────────────
+        if _WAVES_LOADED and entry_cooldown is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if entry_cooldown.is_entry_blocked():
+                    _ec_secs = entry_cooldown.seconds_remaining()
+                    logger.info(f"[ENTRY COOLDOWN] Blocked: post-trade cooldown — {_ec_secs:.0f}s remaining")
+                    return ScalpingSignal.HOLD
+            except Exception as _ece:
+                logger.debug(f"[ENTRY COOLDOWN] Error: {_ece}")
+
+        # ── Wave 38: Volatility Breaker (sustained ATR spike → 90s block) ────
+        if _WAVES_LOADED and volatility_breaker is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if volatility_breaker.is_entry_blocked():
+                    _vb_secs = volatility_breaker.seconds_remaining()
+                    logger.warning(f"[VOLATILITY BREAKER] Blocked: ATR spike — {_vb_secs:.0f}s remaining")
+                    return ScalpingSignal.HOLD
+            except Exception as _vbe:
+                logger.debug(f"[VOLATILITY BREAKER] Error: {_vbe}")
+
         # ── Wave 26: Time Filter (scheduled release window) ───────────────────
         if _WAVES_LOADED and wave26_time_filter is not None and raw_signal != ScalpingSignal.HOLD:
             try:
@@ -2890,6 +2978,34 @@ class MT5LiveTrader:
             if _WAVES_LOADED and trailing_stop_manager is not None:
                 try:
                     state["trailing_stop_manager"] = trailing_stop_manager.info()
+                except Exception:
+                    pass
+
+            # Wave 35: Inject overnight guard status into live_status.json
+            if _WAVES_LOADED and overnight_guard is not None:
+                try:
+                    state["overnight_guard"] = overnight_guard.info()
+                except Exception:
+                    pass
+
+            # Wave 36: Inject spread momentum guard status into live_status.json
+            if _WAVES_LOADED and spread_momentum_guard is not None:
+                try:
+                    state["spread_momentum_guard"] = spread_momentum_guard.info()
+                except Exception:
+                    pass
+
+            # Wave 37: Inject entry cooldown status into live_status.json
+            if _WAVES_LOADED and entry_cooldown is not None:
+                try:
+                    state["entry_cooldown"] = entry_cooldown.info()
+                except Exception:
+                    pass
+
+            # Wave 38: Inject volatility breaker status into live_status.json
+            if _WAVES_LOADED and volatility_breaker is not None:
+                try:
+                    state["volatility_breaker"] = volatility_breaker.info()
                 except Exception:
                     pass
 
