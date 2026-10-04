@@ -1,0 +1,72 @@
+{
+  "timestamp": "2026-10-04T09:08:00.326330",
+  "total_lines_analyzed": 97,
+  "heartbeat_lines": 8,
+  "signal_lines": 9,
+  "trade_lines": 39,
+  "error_lines": 2,
+  "warning_lines": 6,
+  "counts": {
+    "HEARTBEAT": 8,
+    "SIGNAL": 9,
+    "TRADE": 39,
+    "ERROR": 2,
+    "WARNING": 6,
+    "CRITICAL": 3
+  },
+  "balances": [
+    10000.0,
+    10000.0,
+    10000.0,
+    10000.0,
+    9700.0,
+    9700.0,
+    9700.0,
+    9700.0
+  ],
+  "max_balance": 10000.0,
+  "min_balance": 9700.0,
+  "balance_range": 300.0,
+  "signal_distribution": {
+    "BUY": 1,
+    "SELL": 7,
+    "HOLD": 1
+  },
+  "heartbeat_signals": {
+    "BUY": 0,
+    "SELL": 7,
+    "HOLD": 1
+  },
+  "trade_breakdown": {
+    "new_positions": 32,
+    "trades_closed": 4,
+    "risk_losses_recorded": 2,
+    "risk_wins_recorded": 1,
+    "closed_trades_pnl": [
+      {
+        "side": "BUY",
+        "reason": "SL_HIT",
+        "pnl": -100.0,
+        "timestamp": "2026-10-04 08:27:10,768"
+      },
+      {
+        "side": "BUY",
+        "reason": "TP_HIT",
+        "pnl": 100.0,
+        "timestamp": "2026-10-04 08:27:10,771"
+      },
+      {
+        "side": "SELL",
+        "reason": "SL_HIT",
+        "pnl": -300.0,
+        "timestamp": "2026-10-04 08:49:06,447"
+      }
+    ]
+  },
+  "trades_log": {
+    "exists": true,
+    "total_lines": 36,
+    "positions_opened": 32,
+    "trades_closed": 4
+  }
+}

@@ -196,12 +196,25 @@ def read_live_status() -> dict:
 # ---------------------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
+@app.get("/dashboard", response_class=HTMLResponse)
 async def serve_dashboard():
     try:
         dash_path = BASE_DIR / "dashboard.html"
         if dash_path.exists():
             return HTMLResponse(content=dash_path.read_text(encoding="utf-8"))
         return HTMLResponse(content="<h1>OmniCommand Pro Trading Server is Active</h1>")
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
+
+
+@app.get("/performance", response_class=HTMLResponse)
+@app.get("/performance-dashboard", response_class=HTMLResponse)
+async def serve_performance_dashboard():
+    try:
+        dash_path = BASE_DIR / "performance_dashboard.html"
+        if dash_path.exists():
+            return HTMLResponse(content=dash_path.read_text(encoding="utf-8"))
+        return HTMLResponse(content="<h1>Performance Dashboard is Active</h1>")
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
 

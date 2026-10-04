@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Gold Scalping Robot v5 — Mobile Performance Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0c;
+      --card-bg: #141418;
+      --border: #23232a;
+      --gold: #FFD700;
+      --gold-dim: rgba(255, 215, 0, 0.15);
+      --green: #00E676;
+      --green-dim: rgba(0, 230, 118, 0.15);
+      --red: #FF334B;
+      --red-dim: rgba(255, 51, 75, 0.15);
+      --text: #F3F4F6;
+      --text-muted: #9CA3AF;
+      --font-mono: 'JetBrains Mono', monospace;
+      --font-sans: 'Inter', sans-serif;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      padding: 14px;
+      max-width: 680px;
+      margin: 0 auto;
+      -webkit-font-smoothing: antialiased;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand h1 {
+      font-size: 1.15rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #fff;
+    }
+    .brand span {
+      color: var(--gold);
+    }
+    .badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 999px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-family: var(--font-mono);
+    }
+    .badge-live {
+      background: var(--green-dim);
+      color: var(--green);
+      border: 1px solid var(--green);
+    }
+    .badge-offline {
+      background: var(--red-dim);
+      color: var(--red);
+      border: 1px solid var(--red);
+    }
+    .grade-badge {
+      font-size: 1.4rem;
+      font-weight: 900;
+      font-family: var(--font-mono);
+      padding: 4px 12px;
+      border-radius: 8px;
+      background: var(--gold-dim);
+      color: var(--gold);
+      border: 1px solid var(--gold);
+      text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .card-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .card-value {
+      font-size: 1.35rem;
+      font-weight: 800;
+      font-family: var(--font-mono);
+      color: #fff;
+    }
+    .card-sub {
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+    }
+    .chart-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 16px;
+    }
+    .chart-title {
+      font-size: 0.82rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .list-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .trade-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 0.82rem;
+      font-family: var(--font-mono);
+    }
+    .trade-row:last-child {
+      border-bottom: none;
+    }
+    .text-green { color: var(--green); }
+    .text-red { color: var(--red); }
+    .text-gold { color: var(--gold); }
+    footer {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span style="font-size: 1.4rem;">🤖</span>
+      <div>
+        <h1>Gold Scalping <span>v5</span></h1>
+        <div style="font-size: 0.7rem; color: var(--text-muted);">Mobile Performance Dashboard</div>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span id="gradeDisplay" class="grade-badge">A+</span>
+      <span id="liveBadge" class="badge badge-live">LIVE</span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <span class="card-title">Balance / Equity</span>
+      <span id="valBalance" class="card-value">$10,000.00</span>
+      <span id="valEquity" class="card-sub">Eq: $10,000.00</span>
+    </div>
+    <div class="card">
+      <span class="card-title">Daily P&L</span>
+      <span id="valDailyPnl" class="card-value text-green">+$0.00</span>
+      <span id="valPnlPct" class="card-sub text-green">+0.00%</span>
+    </div>
+    <div class="card">
+      <span class="card-title">Win Rate</span>
+      <span id="valWinRate" class="card-value text-gold">90.5%</span>
+      <span id="valTrades" class="card-sub">0 Trades</span>
+    </div>
+    <div class="card">
+      <span class="card-title">XAUUSD Price / Spread</span>
+      <span id="valPrice" class="card-value">2,400.00</span>
+      <span id="valSpread" class="card-sub">Spread: 1.8 pips</span>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-title">
+      <span>Equity Growth Curve</span>
+      <span id="chartPoints" class="text-gold" style="font-family: var(--font-mono); font-size: 0.72rem;">50 PTS</span>
+    </div>
+    <div style="position: relative; height: 180px; width: 100%;">
+      <canvas id="equityChart"></canvas>
+    </div>
+  </div>
+
+  <div class="list-card">
+    <div class="chart-title">Recent Trades</div>
+    <div id="tradesList">
+      <div style="text-align: center; padding: 12px; color: var(--text-muted); font-size: 0.8rem;">Loading trades...</div>
+    </div>
+  </div>
+
+  <footer>
+    OmniCommand Mobile • Last Sync: <span id="lastSync">--:--:--</span>
+  </footer>
+
+  <script>
+    let chartInstance = null;
+
+    function initChart() {
+      const ctx = document.getElementById('equityChart').getContext('2d');
+      chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: Array.from({length: 20}, (_, i) => i + 1),
+          datasets: [{
+            label: 'Balance ($)',
+            data: [10000],
+            borderColor: '#FFD700',
+            backgroundColor: 'rgba(255, 215, 0, 0.08)',
+            borderWidth: 2,
+            tension: 0.3,
+            fill: true,
+            pointRadius: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { display: false },
+            y: {
+              grid: { color: 'rgba(255,255,255,0.05)' },
+              ticks: { color: '#888', font: { size: 10, family: 'JetBrains Mono' } }
+            }
+          }
+        }
+      });
+    }
+
+    function calculateGrade(winRate) {
+      if (winRate > 90) return 'A+';
+      if (winRate > 85) return 'A';
+      if (winRate >= 75) return 'B';
+      return 'C';
+    }
+
+    async function pollData() {
+      try {
+        const [healthRes, analyticsRes] = await Promise.all([
+          fetch('/health').then(r => r.json()).catch(() => null),
+          fetch('/analytics').then(r => r.json()).catch(() => null)
+        ]);
+
+        if (healthRes && healthRes.ok) {
+          const bal = Number(healthRes.balance || 10000);
+          const eq = Number(healthRes.equity || bal);
+          const pnl = Number(healthRes.daily_pnl || 0);
+          const wr = Number(healthRes.win_rate_pct || healthRes.win_rate || 0);
+          const trades = Number(healthRes.total_trades || 0);
+          const price = Number(healthRes.current_price || 0);
+          const spread = Number(healthRes.spread_pips || 0);
+
+          document.getElementById('valBalance').textContent = `$${bal.toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+          document.getElementById('valEquity').textContent = `Eq: $${eq.toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+          
+          const pnlElem = document.getElementById('valDailyPnl');
+          pnlElem.textContent = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
+          pnlElem.className = `card-value ${pnl >= 0 ? 'text-green' : 'text-red'}`;
+
+          const pnlPct = ((pnl / 10000) * 100).toFixed(2);
+          const pnlPctElem = document.getElementById('valPnlPct');
+          pnlPctElem.textContent = `${pnl >= 0 ? '+' : ''}${pnlPct}%`;
+          pnlPctElem.className = `card-sub ${pnl >= 0 ? 'text-green' : 'text-red'}`;
+
+          document.getElementById('valWinRate').textContent = `${wr.toFixed(1)}%`;
+          document.getElementById('valTrades').textContent = `${trades} Trades`;
+          document.getElementById('valPrice').textContent = price.toFixed(2);
+          document.getElementById('valSpread').textContent = `Spread: ${spread.toFixed(1)} pips`;
+
+          const grade = calculateGrade(wr);
+          document.getElementById('gradeDisplay').textContent = grade;
+          document.getElementById('liveBadge').textContent = healthRes.trader_alive ? 'LIVE' : 'IDLE';
+          document.getElementById('liveBadge').className = `badge ${healthRes.trader_alive ? 'badge-live' : 'badge-offline'}`;
+
+          if (healthRes.recent_trades && healthRes.recent_trades.length) {
+            const listHtml = healthRes.recent_trades.slice(0, 5).map(t => {
+              const isWin = (t.pnl || 0) >= 0;
+              return `<div class="trade-row">
+                <span><strong>${t.direction || 'BUY'}</strong> ${t.id || ''}</span>
+                <span style="color: #bbb;">${t.entry || ''} &rarr; ${t.exit || ''}</span>
+                <span class="${isWin ? 'text-green' : 'text-red'}"><strong>${isWin ? '+' : ''}$${Number(t.pnl || 0).toFixed(2)}</strong></span>
+              </div>`;
+            }).join('');
+            document.getElementById('tradesList').innerHTML = listHtml;
+          }
+        }
+
+        if (analyticsRes && analyticsRes.ok && analyticsRes.balances && chartInstance) {
+          chartInstance.data.labels = analyticsRes.balances.map((_, i) => i + 1);
+          chartInstance.data.datasets[0].data = analyticsRes.balances;
+          chartInstance.update();
+        }
+
+        document.getElementById('lastSync').textContent = new Date().toLocaleTimeString();
+      } catch (e) {
+        console.error('Poll failed:', e);
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initChart();
+      pollData();
+      setInterval(pollData, 3000);
+    });
+  </script>
+</body>
+</html>

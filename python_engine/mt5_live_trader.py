@@ -300,6 +300,20 @@ class MT5LiveTrader:
         self._price_buffer: collections.deque = collections.deque(maxlen=10)
         self.sl_pips: float = float(self.config.get("sl_pips", 30.0))
 
+        # ── Wave 7: Advanced analytics & signal state ──────────────────────────
+        self._bb_squeeze: bool = False
+        self._rsi_history: collections.deque = collections.deque(maxlen=5)
+        self._price_highs: collections.deque = collections.deque(maxlen=5)
+        self._ema_cross_signal: str = "NEUTRAL"
+        self._ema8: float = 0.0
+        self._ema21: float = 0.0
+        self._recent_results: collections.deque = collections.deque(maxlen=20)
+        self._breakeven_set: set = set()
+        self._price_1min: collections.deque = collections.deque(maxlen=60)
+        self._price_5min: collections.deque = collections.deque(maxlen=300)
+        self._price_15min: collections.deque = collections.deque(maxlen=900)
+        self._market_regime: str = "RANGING"
+
         # Dynamic Slippage State
         self.current_dynamic_slippage: int = self.config.get("base_slippage", 10)
 
@@ -1040,6 +1054,7 @@ class MT5LiveTrader:
                         self.daily_loss += abs(pnl)
                         self.daily_losses += 1
                         self.consecutive_losses += 1
+                        self._recent_results.append(0)  # Wave 7: Kelly win-rate tracking
                         logger.warning(
                             f"[RISK] Trade LOSS recorded (${pnl:+.2f}). "
                             f"Consecutive losses: {self.consecutive_losses}/3"
@@ -1059,6 +1074,7 @@ class MT5LiveTrader:
                             )
                         self.consecutive_losses = 0
                         self.daily_wins += 1
+                        self._recent_results.append(1)  # Wave 7: Kelly win-rate tracking
 
                     msg = f"[TRADE CLOSED] {pos.get('type')} | {pos.get('close_reason')} | PnL: ${pnl:+,.2f} | Balance: ${self.balance:,.2f}\n"
                     sys.stdout.write(msg)
@@ -1096,6 +1112,10 @@ class MT5LiveTrader:
             price = self.fetch_market_tick()
             current_price = price
             self._price_buffer.append(current_price)
+            # ── Wave 7: update multi-timeframe price deques ────────────────────
+            self._price_1min.append(current_price)
+            self._price_5min.append(current_price)
+            self._price_15min.append(current_price)
             self.update_candles(price)
 
             # Heartbeat check (every 5 minutes)
@@ -1357,11 +1377,67 @@ class MT5LiveTrader:
                             self.consecutive_losses = 0
                             self.daily_wins += 1
 
+                        # Wave 7: Kelly Criterion result tracking
+                        if pnl >= 0:
+                            self._recent_results.append(1)
+                        else:
+                            self._recent_results.append(0)
+
                         msg = f"[TRADE CLOSED] {pos.get('type')} | {pos.get('close_reason')} | PnL: ${pnl:+,.2f} | Balance: ${self.balance:,.2f}\n"
                         sys.stdout.write(msg)
                         sys.stdout.flush()
                         logger.info(msg.strip())
                     else:
+                        # Wave 7: Time-based exits (check before keeping position)
+                        open_time_str = pos.get("open_time", "")
+                        if open_time_str:
+                            try:
+                                open_dt = datetime.fromisoformat(open_time_str.rstrip("Z"))
+                                minutes_open = (datetime.utcnow() - open_dt).total_seconds() / 60.0
+                                pos_lot = float(pos.get("lot_size", lot_size))
+                                pos_entry = float(pos.get("entry", price))
+                                # Calculate floating PnL for this position
+                                if pos_type == ScalpingSignal.BUY:
+                                    float_pnl = round(((price - pos_entry) / pip_size) * pos_lot * 100.0, 2)
+                                else:
+                                    float_pnl = round(((pos_entry - price) / pip_size) * pos_lot * 100.0, 2)
+
+                                force_close = False
+                                close_reason = ""
+                                if minutes_open > 60:
+                                    force_close = True
+                                    close_reason = "TIME_EXIT_60MIN"
+                                elif minutes_open > 30 and float_pnl > 0:
+                                    force_close = True
+                                    close_reason = "TIME_EXIT_30MIN_PROFIT"
+
+                                if force_close:
+                                    pnl = float_pnl
+                                    self.balance += pnl
+                                    self.daily_pnl += pnl
+                                    self.daily_trades += 1
+                                    pos["pnl"] = round(pnl, 2)
+                                    pos["close_price"] = price
+                                    pos["close_time"] = datetime.utcnow().isoformat() + "Z"
+                                    pos["close_reason"] = close_reason
+                                    self.last_trade_time = pos["close_time"]
+                                    self.trades_history.append(pos)
+                                    self._recent_results.append(1 if pnl >= 0 else 0)
+                                    if pnl < 0:
+                                        self.daily_loss += abs(pnl)
+                                        self.daily_losses += 1
+                                        self.consecutive_losses += 1
+                                    else:
+                                        self.consecutive_losses = 0
+                                        self.daily_wins += 1
+                                    tmsg = f"[TIME EXIT] {pos.get('type')} | {close_reason} | {minutes_open:.1f}min | PnL: ${pnl:+,.2f}\n"
+                                    sys.stdout.write(tmsg)
+                                    sys.stdout.flush()
+                                    logger.info(tmsg.strip())
+                                    continue  # Don't add to remaining_positions
+                            except Exception:
+                                pass  # fromisoformat failed — keep position
+
                         remaining_positions.append(pos)
 
                 self.open_positions = remaining_positions
@@ -1606,9 +1682,10 @@ class MT5LiveTrader:
 
     def _get_dynamic_lot(self, balance: float) -> float:
         """
-        Dynamic lot sizing formula:
-        dynamic formula = max(0.01, min(balance * 0.01 / (sl_pips * 10), max_lot_size))
-        Calculates position size strictly risking 1% of balance per trade given the SL distance.
+        Wave 7: Kelly Criterion-based position sizing with half-Kelly safety and drawdown scaling.
+        kelly_fraction = win_rate - (1 - win_rate) / rr_ratio
+        actual_lot = balance * kelly_fraction * 0.01 / (sl_pips * 10) * 0.5 (half-Kelly)
+        Falls back to standard 1% risk formula when insufficient trade history.
         """
         # Daily profit lock: if daily_pnl > 300, reduce lot_size to base minimum (0.01)
         if getattr(self, "daily_pnl", 0.0) > 300:
@@ -1616,13 +1693,38 @@ class MT5LiveTrader:
 
         sl_pips = float(self.config.get("sl_pips", 30.0))
         max_lot_size = float(self.config.get("max_lot_size", 0.10))
-        risk_pct = float(self.config.get("risk_per_trade_pct", 1.0)) / 100.0  # 1.0% = 0.01
-
-        # dynamic formula = max(0.01, min(balance * 0.01 / (sl_pips * 10), max_lot_size))
+        rr_ratio = float(self.config.get("rr_ratio", 1.5))
         denominator = sl_pips * 10.0 if sl_pips > 0 else 300.0
-        calculated_lot = (balance * risk_pct) / denominator
-        lot = max(0.01, min(calculated_lot, max_lot_size))
+
+        # ── Kelly Criterion ──────────────────────────────────────────────────
+        if len(self._recent_results) >= 5:
+            win_rate = sum(self._recent_results) / len(self._recent_results)
+            kelly_fraction = win_rate - (1.0 - win_rate) / rr_ratio
+            kelly_fraction = max(0.01, kelly_fraction)  # Floor to avoid zero/negative
+            kelly_lot = (balance * kelly_fraction * 0.01) / denominator
+            actual_lot = kelly_lot * 0.5  # Half-Kelly for safety
+            logger.debug(
+                f"[KELLY SIZING] fraction={kelly_fraction:.4f} lot={actual_lot:.3f} "
+                f"(win_rate={win_rate*100:.1f}% rr={rr_ratio})"
+            )
+        else:
+            # Insufficient history — fall back to standard 1% risk
+            risk_pct = float(self.config.get("risk_per_trade_pct", 1.0)) / 100.0
+            actual_lot = (balance * risk_pct) / denominator
+
+        # ── Drawdown-based scaling ────────────────────────────────────────────
+        peak_balance = float(self.config.get("min_balance_usd", 9700.0)) + 300.0  # ~10000
+        current_drawdown_pct = max(0.0, (peak_balance - balance) / peak_balance * 100.0)
+        if current_drawdown_pct > 5.0:
+            actual_lot *= 0.25
+            logger.debug(f"[DRAWDOWN REDUCTION] DD={current_drawdown_pct:.1f}% lot scaled to {actual_lot:.3f}")
+        elif current_drawdown_pct > 3.0:
+            actual_lot *= 0.5
+            logger.debug(f"[DRAWDOWN REDUCTION] DD={current_drawdown_pct:.1f}% lot scaled to {actual_lot:.3f}")
+
+        lot = max(0.01, min(actual_lot, max_lot_size))
         return round(lot, 2)
+
 
     def _calculate_macd(self, prices: list, fast: int = 12, slow: int = 26, signal_period: int = 9):
         """Calculate MACD line, signal line, and histogram (pure Python — no pandas needed)."""
@@ -1647,11 +1749,41 @@ class MT5LiveTrader:
         hist = macd_line[-1] - signal_line[-1]
         return macd_line[-1], signal_line[-1], hist
 
+    def _detect_market_regime(self, prices: list) -> str:
+        """
+        Wave 7: Detect market regime from recent price action.
+        Returns: 'TRENDING_UP', 'TRENDING_DOWN', 'VOLATILE', or 'RANGING'
+        """
+        if len(prices) < 20:
+            return "RANGING"
+        window = prices[-20:]
+        avg_price = sum(window) / len(window)
+        price_range = max(window) - min(window)
+        avg_range = sum(abs(window[i] - window[i-1]) for i in range(1, len(window))) / (len(window) - 1)
+        # Volatile: range > 2x average single-tick move * 20
+        if price_range > avg_range * 40:
+            return "VOLATILE"
+        # EMA20 trend bias
+        k = 2.0 / 21.0
+        ema20 = window[0]
+        for v in window[1:]:
+            ema20 = v * k + ema20 * (1 - k)
+        last = prices[-1]
+        if last > ema20 * 1.0005:
+            return "TRENDING_UP"
+        elif last < ema20 * 0.9995:
+            return "TRENDING_DOWN"
+        return "RANGING"
+
     def _get_signal(self, ind: Dict[str, Any]) -> str:
         """
-        Institutional quantitative signal confluence:
-        Combines Bollinger Bands boundary tests, Exponential Moving Averages, RSI momentum, and MACD.
-        Relaxed thresholds for consistent signal generation across all sessions.
+        Wave 7 Institutional quantitative signal confluence:
+        - BB squeeze detection
+        - EMA(8/21) cross confirmation
+        - RSI divergence filter
+        - Market regime detection
+        - Multi-timeframe (1min/5min/15min) consensus
+        - MACD filter
         """
         close = ind.get("close", self.current_price)
         bb_upper = ind.get("bb_upper", close + 5.0)
@@ -1669,10 +1801,63 @@ class MT5LiveTrader:
         if self.robot.shield_status.get("halted", False):
             return ScalpingSignal.HOLD
 
+        # ── Wave 7: BB Squeeze Detection ─────────────────────────────────────
+        bb_width = (bb_upper - bb_lower) / bb_mid if bb_mid > 0 else 0.01
+        prev_bb_squeeze = self._bb_squeeze
+        self._bb_squeeze = bb_width < 0.002
+        if self._bb_squeeze and not prev_bb_squeeze:
+            logger.info(f"[BB SQUEEZE DETECTED] width={bb_width:.5f} — breakout likely")
+
+        # ── Wave 7: EMA(8/21) Cross Computation ──────────────────────────────
+        close_prices_all = [float(b.get("close", 0.0)) for b in self.bars[-60:] if isinstance(b, dict) and "close" in b] if len(self.bars) >= 30 else []
+        prev_ema_cross = self._ema_cross_signal
+        if len(close_prices_all) >= 21:
+            def _ema(data, period):
+                k = 2.0 / (period + 1)
+                e = data[0]
+                for v in data[1:]:
+                    e = v * k + e * (1 - k)
+                return e
+            self._ema8 = _ema(close_prices_all, 8)
+            self._ema21 = _ema(close_prices_all, 21)
+            if self._ema8 > self._ema21:
+                self._ema_cross_signal = "BUY"
+            elif self._ema8 < self._ema21:
+                self._ema_cross_signal = "SELL"
+            else:
+                self._ema_cross_signal = "NEUTRAL"
+            if self._ema_cross_signal != prev_ema_cross:
+                logger.debug(f"[EMA CROSS] EMA8={self._ema8:.3f} EMA21={self._ema21:.3f} -> {self._ema_cross_signal}")
+
+        # ── Wave 7: RSI Divergence Tracking ──────────────────────────────────
+        self._rsi_history.append(rsi)
+        self._price_highs.append(close)
+        rsi_divergence = "NONE"
+        if len(self._rsi_history) >= 5 and len(self._price_highs) >= 5:
+            rsi_list = list(self._rsi_history)
+            price_list = list(self._price_highs)
+            # Bullish divergence: price lower lows, RSI higher lows
+            if price_list[-1] < price_list[-3] and rsi_list[-1] > rsi_list[-3]:
+                rsi_divergence = "BULLISH"
+                logger.debug(f"[RSI DIVERGENCE] Bullish — price lower low, RSI higher low")
+            # Bearish divergence: price higher highs, RSI lower highs
+            elif price_list[-1] > price_list[-3] and rsi_list[-1] < rsi_list[-3]:
+                rsi_divergence = "BEARISH"
+                logger.debug(f"[RSI DIVERGENCE] Bearish — price higher high, RSI lower high")
+
+        # ── Wave 7: Market Regime Detection ──────────────────────────────────
+        price_buf_list = list(self._price_buffer) + [close]
+        self._market_regime = self._detect_market_regime(price_buf_list)
+
+        # VOLATILE regime: skip trading
+        if self._market_regime == "VOLATILE":
+            logger.debug(f"[REGIME HOLD] VOLATILE market — skipping signal")
+            return ScalpingSignal.HOLD
+
         raw_signal = ScalpingSignal.HOLD
         tier_hit = None  # for diagnostic logging
 
-        # ── TIER 1: Strong BB mean-reversion (price at band extremes) ──────────
+        # ── TIER 1: Strong BB mean-reversion (price at band extremes) ──────────────────────
         if close <= bb_lower and rsi < 55.0:
             raw_signal = ScalpingSignal.BUY
             tier_hit = f"T1-BB-BUY  | close={close:.3f} <= bb_lower={bb_lower:.3f}, rsi={rsi:.1f}"
@@ -1682,10 +1867,7 @@ class MT5LiveTrader:
             tier_hit = f"T1-BB-SELL | close={close:.3f} >= bb_upper={bb_upper:.3f}, rsi={rsi:.1f}"
             logger.debug(f"TIER 1 triggered: {raw_signal}")
 
-        # ── TIER 2: EMA trend + momentum (primary scalp engine) ──────────────
-        # BUG FIX: widened proximity band 0.0003→0.0015 (0.03%→0.15%).
-        # At XAUUSD ~$2400 the old band was only $0.72; new band is $3.60,
-        # which realistically captures pullbacks to fast EMA without over-trading.
+        # ── TIER 2: EMA trend + momentum (primary scalp engine) ─────────────────────────
         elif fast_ema > slow_ema and rsi < 65.0 and close < fast_ema * 1.0015:
             raw_signal = ScalpingSignal.BUY
             tier_hit = f"T2-EMA-BUY  | fast={fast_ema:.3f} > slow={slow_ema:.3f}, close={close:.3f}, rsi={rsi:.1f}"
@@ -1695,7 +1877,7 @@ class MT5LiveTrader:
             tier_hit = f"T2-EMA-SELL | fast={fast_ema:.3f} < slow={slow_ema:.3f}, close={close:.3f}, rsi={rsi:.1f}"
             logger.debug(f"TIER 2 triggered: {raw_signal}")
 
-        # ── TIER 3: RSI momentum extremes (override on strong momentum) ───────
+        # ── TIER 3: RSI momentum extremes (override on strong momentum) ─────────────────
         elif rsi <= 35.0:
             raw_signal = ScalpingSignal.BUY
             tier_hit = f"T3-RSI-BUY  | rsi={rsi:.1f} <= 35.0"
@@ -1705,7 +1887,7 @@ class MT5LiveTrader:
             tier_hit = f"T3-RSI-SELL | rsi={rsi:.1f} >= 65.0"
             logger.debug(f"TIER 3 triggered: {raw_signal}")
 
-        # ── TIER 4: Price vs midband + EMA agreement (widest catch-all) ───────
+        # ── TIER 4: Price vs midband + EMA agreement (widest catch-all) ────────────────
         elif fast_ema >= slow_ema and close < bb_mid and rsi < 58.0:
             raw_signal = ScalpingSignal.BUY
             tier_hit = f"T4-MID-BUY  | fast={fast_ema:.3f} >= slow={slow_ema:.3f}, close={close:.3f} < bb_mid={bb_mid:.3f}, rsi={rsi:.1f}"
@@ -1715,7 +1897,7 @@ class MT5LiveTrader:
             tier_hit = f"T4-MID-SELL | fast={fast_ema:.3f} < slow={slow_ema:.3f}, close={close:.3f} > bb_mid={bb_mid:.3f}, rsi={rsi:.1f}"
             logger.debug(f"TIER 4 triggered: {raw_signal}")
 
-        # ── TIER 5: Robot entry signal fallback ──────────────────────────────
+        # ── TIER 5: Robot entry signal fallback ─────────────────────────────────────────
         elif entry_sig in [ScalpingSignal.BUY, ScalpingSignal.SELL]:
             raw_signal = entry_sig
             tier_hit = f"T5-ROBOT-{'BUY' if entry_sig == ScalpingSignal.BUY else 'SELL'} | fallback from ScalpingRobotV5.evaluate_entry"
@@ -1724,25 +1906,73 @@ class MT5LiveTrader:
         if raw_signal == ScalpingSignal.HOLD:
             return ScalpingSignal.HOLD
 
-        # ── MACD CONFLUENCE FILTER (relaxed) ─────────────────────────────────
-        # Block ONLY if MACD histogram strongly opposes the signal and exceeds threshold (|macd_hist| > threshold).
-        # Minor MACD disagreement (|macd_hist| <= threshold) is permitted — avoids over-filtering at low-volatility periods.
+        # ── Wave 7: RSI Divergence Filter (override signal if divergence opposes) ──────
+        if rsi_divergence == "BULLISH" and raw_signal == ScalpingSignal.SELL:
+            logger.debug(f"[RSI DIV OVERRIDE] Bullish divergence detected — suppressing SELL")
+            return ScalpingSignal.HOLD
+        if rsi_divergence == "BEARISH" and raw_signal == ScalpingSignal.BUY:
+            logger.debug(f"[RSI DIV OVERRIDE] Bearish divergence detected — suppressing BUY")
+            return ScalpingSignal.HOLD
+
+        # ── Wave 7: EMA(8/21) Cross Confirmation ─────────────────────────────────────
+        if self._ema_cross_signal == "BUY" and raw_signal == ScalpingSignal.SELL:
+            logger.debug(f"[EMA CROSS FILTER] EMA8>EMA21 (bullish) — suppressing SELL")
+            return ScalpingSignal.HOLD
+        if self._ema_cross_signal == "SELL" and raw_signal == ScalpingSignal.BUY:
+            logger.debug(f"[EMA CROSS FILTER] EMA8<EMA21 (bearish) — suppressing BUY")
+            return ScalpingSignal.HOLD
+
+        # ── Wave 7: Multi-Timeframe Consensus ────────────────────────────────────────
+        mtf_votes_up = 0
+        mtf_votes_down = 0
+        if len(self._price_1min) >= 10:
+            avg_1m = sum(list(self._price_1min)[-10:]) / 10
+            if close > avg_1m:
+                mtf_votes_up += 1
+            else:
+                mtf_votes_down += 1
+        if len(self._price_5min) >= 20:
+            avg_5m = sum(list(self._price_5min)[-20:]) / 20
+            if close > avg_5m:
+                mtf_votes_up += 1
+            else:
+                mtf_votes_down += 1
+        if len(self._price_15min) >= 30:
+            avg_15m = sum(list(self._price_15min)[-30:]) / 30
+            if close > avg_15m:
+                mtf_votes_up += 1
+            else:
+                mtf_votes_down += 1
+        total_mtf = mtf_votes_up + mtf_votes_down
+        if total_mtf >= 2:
+            mtf_bias = "BULL" if mtf_votes_up > mtf_votes_down else "BEAR"
+            logger.debug(f"[MTF CHECK] up={mtf_votes_up} down={mtf_votes_down} bias={mtf_bias} signal={raw_signal}")
+            # Require 2/3 timeframes to agree with the signal
+            if raw_signal == ScalpingSignal.BUY and mtf_votes_up < 2:
+                logger.debug(f"[MTF SUPPRESSED] BUY but only {mtf_votes_up}/3 timeframes bullish")
+                return ScalpingSignal.HOLD
+            if raw_signal == ScalpingSignal.SELL and mtf_votes_down < 2:
+                logger.debug(f"[MTF SUPPRESSED] SELL but only {mtf_votes_down}/3 timeframes bearish")
+                return ScalpingSignal.HOLD
+
+        # ── MACD CONFLUENCE FILTER (relaxed) ───────────────────────────────────────
         close_prices = [float(b.get("close", 0.0)) for b in self.bars[-60:] if isinstance(b, dict) and "close" in b] if len(self.bars) >= 35 else []
         if close_prices:
             _, _, macd_hist = self._calculate_macd(close_prices)
             macd_threshold = float(self.config.get("macd_filter_threshold", 0.5))
-            # Only block if |macd_hist| > macd_threshold opposing the signal
             if raw_signal == ScalpingSignal.BUY and macd_hist < -macd_threshold:
-                logger.debug(f"[SIGNAL SUPPRESSED] {tier_hit} | MACD hist={macd_hist:.4f} < -{macd_threshold} (|macd_hist| > {macd_threshold}) — strong bearish divergence")
-                return ScalpingSignal.HOLD   # Strong MACD bearish — suppress buy
+                logger.debug(f"[SIGNAL SUPPRESSED] {tier_hit} | MACD hist={macd_hist:.4f} < -{macd_threshold} — strong bearish divergence")
+                return ScalpingSignal.HOLD
             if raw_signal == ScalpingSignal.SELL and macd_hist > macd_threshold:
-                logger.debug(f"[SIGNAL SUPPRESSED] {tier_hit} | MACD hist={macd_hist:.4f} > {macd_threshold} (|macd_hist| > {macd_threshold}) — strong bullish divergence")
-                return ScalpingSignal.HOLD   # Strong MACD bullish — suppress sell
-            logger.debug(f"[SIGNAL FIRED] {tier_hit} | MACD hist={macd_hist:.4f} (|macd_hist| <= {macd_threshold} or aligned) → {raw_signal}")
+                logger.debug(f"[SIGNAL SUPPRESSED] {tier_hit} | MACD hist={macd_hist:.4f} > {macd_threshold} — strong bullish divergence")
+                return ScalpingSignal.HOLD
+            logger.debug(f"[SIGNAL FIRED] {tier_hit} | MACD hist={macd_hist:.4f} regime={self._market_regime} ema_cross={self._ema_cross_signal} -> {raw_signal}")
         else:
-            logger.debug(f"[SIGNAL FIRED] {tier_hit} | MACD skipped (insufficient bars) → {raw_signal}")
+            logger.debug(f"[SIGNAL FIRED] {tier_hit} | MACD skipped regime={self._market_regime} ema_cross={self._ema_cross_signal} -> {raw_signal}")
 
         return raw_signal
+
+
 
 
 
@@ -2087,6 +2317,19 @@ class MT5LiveTrader:
                     for i, t in enumerate(list(self.trades_history)[-10:])
                 ],
                 "latency_metrics": dict(self.latency_metrics),
+                "market_regime": getattr(self, "_market_regime", "RANGING"),
+                "mtf_bias": (
+                    "BULL" if (
+                        len(getattr(self, "_price_1min", [])) >= 10 and
+                        list(getattr(self, "_price_1min", []))[-1] > sum(list(getattr(self, "_price_1min", []))[-10:]) / 10
+                    ) else "BEAR"
+                ),
+                "bb_squeeze": getattr(self, "_bb_squeeze", False),
+                "ema_cross": getattr(self, "_ema_cross_signal", "NEUTRAL"),
+                "kelly_win_rate": round(
+                    sum(getattr(self, "_recent_results", []) or [0]) /
+                    max(len(getattr(self, "_recent_results", []) or [0]), 1) * 100, 1
+                ),
                 "updated_at": now_iso
             }
 

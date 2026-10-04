@@ -68,5 +68,15 @@
         "win_rate_pct":  0,
         "grade":  "C",
         "trend":  "$0.00 (FLAT at $9700)"
+    },
+    {
+        "cycle":  46,
+        "timestamp":  "2026-10-04T09:14:23Z",
+        "balance":  9700,
+        "equity":  9413,
+        "daily_pnl":  -300,
+        "win_rate_pct":  0,
+        "grade":  "C",
+        "trend":  "$0.00 (FLAT at $9700)"
     }
 ]
