@@ -653,6 +653,42 @@ async def system_health():
 
 
 # ---------------------------------------------------------------------------
+# Wave 15: ML Status endpoint + Dashboard v2 serve
+# ---------------------------------------------------------------------------
+@app.get("/ml_status")
+async def ml_status():
+    """Return last ML predictor result from live_status.json."""
+    try:
+        import json as _j
+        status_path = os.path.join(ROOT, "live_status.json")
+        if not os.path.exists(status_path):
+            return JSONResponse({"error": "live_status.json not found"}, status_code=404,
+                                headers={"Access-Control-Allow-Origin": "*"})
+        with open(status_path, encoding="utf-8") as f:
+            data = _j.load(f)
+        ml = data.get("ml_prediction") or data.get("ml") or {}
+        return JSONResponse({"ml": ml, "ts": data.get("ts", "")},
+                            headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500,
+                            headers={"Access-Control-Allow-Origin": "*"})
+
+
+@app.get("/dashboard_v2", response_class=HTMLResponse)
+@app.get("/dash2", response_class=HTMLResponse)
+async def serve_dashboard_v2():
+    """Serve Wave 15 Chart.js advanced dashboard."""
+    try:
+        p = os.path.join(ROOT, "dashboard_v2.html")
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as f:
+                return HTMLResponse(f.read())
+        return HTMLResponse("<h1>dashboard_v2.html not found</h1>", status_code=404)
+    except Exception as exc:
+        return HTMLResponse(f"<pre>{exc}</pre>", status_code=500)
+
+
+# ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":

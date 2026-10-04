@@ -2468,6 +2468,16 @@ class MT5LiveTrader:
                 "updated_at": now_iso
             }
 
+            # Wave 17: Inject ML prediction into live_status.json for dashboard
+            if _WAVES_LOADED and ml_predictor is not None:
+                try:
+                    closes_ml = [float(b.get("close", self.current_price)) for b in list(self.bars)[-25:] if isinstance(b, dict)]
+                    if len(closes_ml) >= 5:
+                        ml_pred = ml_predictor.predict(closes_ml)
+                        state["ml_prediction"] = ml_pred
+                except Exception:
+                    pass
+
             if sync:
                 try:
                     _atomic_write_status(STATUS_FILE, state)
