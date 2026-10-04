@@ -86,6 +86,10 @@ try:
     from wave26_time_filter import time_filter as wave26_time_filter
     from wave27_correlation_guard import correlation_guard
     from wave28_momentum_confirmation import momentum_confirmation
+    from wave29_adaptive_tp import adaptive_tp
+    from wave30_session_lot_booster import session_lot_booster
+    from wave31_reversal_detector import reversal_detector
+    from wave32_gap_guard import gap_guard
     _WAVES_LOADED = True
 except Exception:
     _WAVES_LOADED = False
@@ -106,6 +110,11 @@ except Exception:
     wave26_time_filter = None
     correlation_guard = None
     momentum_confirmation = None
+    adaptive_tp = None
+    session_lot_booster = None
+    reversal_detector = None
+    gap_guard = None
+
 
 
 LOG_DIR = Path(__file__).resolve().parent.parent
@@ -1234,6 +1243,24 @@ class MT5LiveTrader:
                     momentum_confirmation.update_price(current_price)
                 except Exception:
                     pass
+            # Wave 29: Feed adaptive TP ATR buffer
+            if _WAVES_LOADED and adaptive_tp is not None:
+                try:
+                    adaptive_tp.update_price(current_price)
+                except Exception:
+                    pass
+            # Wave 31: Feed reversal detector price buffer
+            if _WAVES_LOADED and reversal_detector is not None:
+                try:
+                    reversal_detector.update_price(current_price)
+                except Exception:
+                    pass
+            # Wave 32: Feed gap guard tick checker
+            if _WAVES_LOADED and gap_guard is not None:
+                try:
+                    gap_guard.update_price(current_price)
+                except Exception:
+                    pass
             self.update_candles(price)
 
             # Heartbeat check (every 5 minutes)
@@ -1709,6 +1736,13 @@ class MT5LiveTrader:
                         except Exception:
                             pass
 
+                    # Wave 29: Adaptive TP — extend/shrink based on ATR momentum
+                    if _WAVES_LOADED and adaptive_tp is not None:
+                        try:
+                            tp_pips = adaptive_tp.adjust_tp(tp_pips)
+                        except Exception:
+                            pass
+
                     sl = round(price - (sl_pips * pip_size) if signal == ScalpingSignal.BUY else price + (sl_pips * pip_size), self.digits)
                     tp = round(price + (tp_pips * pip_size) if signal == ScalpingSignal.BUY else price - (tp_pips * pip_size), self.digits)
 
@@ -1926,6 +1960,21 @@ class MT5LiveTrader:
                         "[WAVE25] Lot scaled to %.3f (multiplier=%.2f, consec_losses=%d)",
                         actual_lot, mult, drawdown_accelerator.info().get("consec_losses", 0)
                     )
+            except Exception:
+                pass
+
+        # Wave 30: Session Lot Booster — boost lot during London+NY overlap peak
+        if _WAVES_LOADED and session_lot_booster is not None:
+            try:
+                _sess_vol = 1.0
+                _win_rate = 50.0
+                if session_optimizer is not None:
+                    _sess_info30 = session_optimizer.get_current_session_info()
+                    _sess_vol = float(_sess_info30.get("vol_index", 1.0))
+                if self.total_trades > 0:
+                    _win_rate = (self.daily_wins / self.total_trades) * 100.0
+                actual_lot = session_lot_booster.apply_boost(actual_lot, _sess_vol, _win_rate)
+                actual_lot = min(actual_lot, max_lot_size)
             except Exception:
                 pass
 
@@ -2214,6 +2263,16 @@ class MT5LiveTrader:
             except Exception as _eqe:
                 logger.debug(f"[EQ HALT] Error: {_eqe}")
 
+        # ── Wave 32: Gap Guard (large tick gap → 120s trading block) ──────────
+        if _WAVES_LOADED and gap_guard is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                _gg_ok, _gg_reason = gap_guard.is_trading_allowed()
+                if not _gg_ok:
+                    logger.warning(f"[GAP GUARD] Blocked: {_gg_reason}")
+                    return ScalpingSignal.HOLD
+            except Exception as _gge:
+                logger.debug(f"[GAP GUARD] Error: {_gge}")
+
         # ── Wave 26: Time Filter (scheduled release window) ───────────────────
         if _WAVES_LOADED and wave26_time_filter is not None and raw_signal != ScalpingSignal.HOLD:
             try:
@@ -2246,6 +2305,17 @@ class MT5LiveTrader:
                     return ScalpingSignal.HOLD
             except Exception as _mome:
                 logger.debug(f"[MOMENTUM] Error: {_mome}")
+
+        # ── Wave 31: Reversal Detector (RSI divergence counter-signal) ──────────
+        if _WAVES_LOADED and reversal_detector is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                _rev_sig, _rev_conf, _rev_reason = reversal_detector.get_reversal_signal()
+                _sig_str31 = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
+                if _rev_sig != "HOLD" and _rev_sig != _sig_str31 and _rev_conf >= 0.5:
+                    logger.warning(f"[REVERSAL] Suppressing {raw_signal}: reversal={_rev_sig} conf={_rev_conf:.2f} ({_rev_reason})")
+                    return ScalpingSignal.HOLD
+            except Exception as _reve:
+                logger.debug(f"[REVERSAL] Error: {_reve}")
 
         # ── Wave 10: Session Quality Gate ────────────────────────────────────
         if _WAVES_LOADED and session_optimizer is not None:
@@ -2737,6 +2807,34 @@ class MT5LiveTrader:
             if _WAVES_LOADED and momentum_confirmation is not None:
                 try:
                     state["momentum_confirmation"] = momentum_confirmation.info()
+                except Exception:
+                    pass
+
+            # Wave 29: Inject adaptive TP status into live_status.json
+            if _WAVES_LOADED and adaptive_tp is not None:
+                try:
+                    state["adaptive_tp"] = adaptive_tp.info()
+                except Exception:
+                    pass
+
+            # Wave 30: Inject session lot booster status into live_status.json
+            if _WAVES_LOADED and session_lot_booster is not None:
+                try:
+                    state["session_lot_booster"] = session_lot_booster.info()
+                except Exception:
+                    pass
+
+            # Wave 31: Inject reversal detector status into live_status.json
+            if _WAVES_LOADED and reversal_detector is not None:
+                try:
+                    state["reversal_detector"] = reversal_detector.info()
+                except Exception:
+                    pass
+
+            # Wave 32: Inject gap guard status into live_status.json
+            if _WAVES_LOADED and gap_guard is not None:
+                try:
+                    state["gap_guard"] = gap_guard.info()
                 except Exception:
                     pass
 
