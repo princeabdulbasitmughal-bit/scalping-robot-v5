@@ -37,9 +37,14 @@ import threading
 import collections
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Union
 import urllib.request
 import urllib.error
+
+try:
+    import msvcrt
+except ImportError as e:
+    msvcrt = None
 
 # Attempt to import official MetaTrader5 library
 try:
@@ -49,8 +54,12 @@ except ImportError as e:
     MT5_AVAILABLE = False
     mt5 = None
 
-from .scalping_engine import ScalpingRobotV5, ScalpingSignal
-from .storage import atomic_write_json, safe_read_json
+try:
+    from .scalping_engine import ScalpingRobotV5, ScalpingSignal
+    from .storage import atomic_write_json, safe_read_json
+except ImportError as e:
+    from scalping_engine import ScalpingRobotV5, ScalpingSignal
+    from storage import atomic_write_json, safe_read_json
 
 LOG_DIR = Path(__file__).resolve().parent.parent
 TRADER_LOG_FILE = LOG_DIR / "trader.log"
@@ -107,6 +116,71 @@ STATUS_FILE = Path(__file__).resolve().parent.parent / "live_status.json"
 ANALYTICS_FILE = Path(__file__).resolve().parent.parent / "analytics.json"
 
 
+def _atomic_write_status(file_path: Union[str, Path], data: Dict[str, Any]) -> bool:
+    """
+    Atomically writes status JSON to file_path:
+    1. Writes to temporary file in the same directory first.
+    2. Flushes buffers and syncs to disk (fsync).
+    3. Acquires Windows non-blocking file lock via msvcrt if available.
+    4. Atomically renames temporary file to target path with retry backoff for Windows locks.
+    5. Releases lock and cleans up temporary file on failure.
+    Guarantees readers never see empty or partial files.
+    """
+    path = Path(file_path).resolve()
+    dir_path = path.parent
+    dir_path.mkdir(parents=True, exist_ok=True)
+    temp_path = dir_path / f"{path.name}.tmp.{os.getpid()}.{time.time_ns()}"
+
+    try:
+        content = json.dumps(data, indent=2, default=str).encode("utf-8")
+        with open(temp_path, "wb") as f:
+            if msvcrt is not None:
+                try:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, max(1, len(content)))
+                except (OSError, IOError, AttributeError) as e:
+                    pass
+            f.write(content)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except (AttributeError, OSError) as e:
+                pass
+            if msvcrt is not None:
+                try:
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, max(1, len(content)))
+                except (OSError, IOError, AttributeError) as e:
+                    pass
+
+        # Atomic replacement with retry backoff for Windows file locks
+        for attempt in range(1, 11):
+            try:
+                os.replace(temp_path, path)
+                return True
+            except (PermissionError, OSError) as err:
+                sleep_time = 0.01 * attempt + random.uniform(0.005, 0.015)
+                if sleep_time > 5.0:
+                    logger.warning(f"[RETRY SLEEP WARNING] sleep_time={sleep_time:.2f}s exceeds 5s in _atomic_write_status")
+                time.sleep(sleep_time)
+
+        # Final replacement attempt
+        try:
+            os.replace(temp_path, path)
+            return True
+        except Exception as err:
+            logger.warning(f"[ATOMIC WRITE] Final replace attempt failed for {path}: {err}")
+            return False
+
+    except Exception as exc:
+        logger.error(f"[ATOMIC WRITE] Error writing atomic status file {path}: {exc}", exc_info=True)
+        return False
+    finally:
+        if temp_path.exists():
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception as e:
+                logger.debug(f"Failed to unlink temp file {temp_path}: {e}")
+
 
 class MT5LiveTrader:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -145,7 +219,10 @@ class MT5LiveTrader:
             "max_trades_per_hour": 30,        # Rate limiter: max 30 trades/hour (sliding window)
             "max_daily_loss_usd": 200.0,      # Circuit breaker threshold — raised 150→200 (2% of 10k)
             "min_balance_usd": 9700.0,        # Hard floor below which trading halts
-            "entry_cooldown_sec": 30.0        # Min seconds between new entries (prevents over-trading after SL)
+            "entry_cooldown_sec": 30.0,       # Min seconds between new entries (prevents over-trading after SL)
+            "daily_profit_target_usd": 200.0, # Stop trading when $200 profit hit
+            "max_positions_per_session": 3,   # Max 3 concurrent positions
+            "min_time_between_trades_sec": 60 # 60 sec min between new trades
         }
         if config:
             self.config.update(config)
@@ -175,15 +252,27 @@ class MT5LiveTrader:
         self._trades_closed_count: int = 0
         self.last_analytics_log_time: float = time.time()
         self.open_positions: List[Dict[str, Any]] = []
+        self._trailing_stops: Dict[Any, bool] = {}
+        self._partial_closes: Dict[Any, bool] = {}
         self.bars: List[Dict[str, Any]] = []
         self.spread_pips = 1.6
         self.last_signal = "HOLD"
         self.filling_mode = None
+        self.last_trade_time: str = ""
+        try:
+            if STATUS_FILE.exists():
+                existing_st = safe_read_json(STATUS_FILE, default={})
+                if isinstance(existing_st, dict):
+                    self.last_trade_time = str(existing_st.get("last_trade_time", "") or "")
+        except Exception as e:
+            logger.debug(f"[INIT] Could not restore last_trade_time: {e}")
 
         # ── Circuit Breaker & Risk Tracking ──────────────────────────────────
         self._last_reset_date = datetime.utcnow().date()
         self._last_daily_reset = self._last_reset_date
         self.trading_halted: bool = False
+        self._profit_target_hit: bool = False
+        self._last_entry_time: float = 0.0
         self.consecutive_losses: int = 0          # reset on any win, increment on loss
         self.daily_wins: int = 0                  # wins today
         self.daily_losses: int = 0                # losses today
@@ -206,6 +295,10 @@ class MT5LiveTrader:
 
         # Trade Rate Limiter: sliding window deque of trade timestamps
         self._trade_timestamps: collections.deque = collections.deque()
+
+        # Price Buffer for Momentum Confirmation & Dynamic ATR Stop Loss (deque maxlen=10)
+        self._price_buffer: collections.deque = collections.deque(maxlen=10)
+        self.sl_pips: float = float(self.config.get("sl_pips", 30.0))
 
         # Dynamic Slippage State
         self.current_dynamic_slippage: int = self.config.get("base_slippage", 10)
@@ -252,6 +345,8 @@ class MT5LiveTrader:
         # Fix B6: seed current_price from Yahoo Finance at startup (not hardcoded 2405.95)
         fetched_price = MT5LiveTrader._fetch_yahoo_price()
         self.current_price = fetched_price if fetched_price else 2400.0
+        self._unrounded_price = float(self.current_price)
+        self.sim_mode = True
         self._init_bars()
 
     def _validate_config(self) -> None:
@@ -305,6 +400,9 @@ class MT5LiveTrader:
             })
         self.current_price = p
         self.last_bar_time = now
+        if hasattr(self, "_price_buffer"):
+            for b in self.bars[-10:]:
+                self._price_buffer.append(float(b["close"]))
 
     def connect_mt5(self) -> bool:
         """
@@ -458,16 +556,20 @@ class MT5LiveTrader:
                     logger.debug(f"[MT5] Tick error: {e}. Switching to simulation.")
 
 
-        # Forward Simulation — Real Price Feed via Yahoo Finance (fallback: micro-jitter)
-        real_price = self._fetch_yahoo_price()
-        if real_price is not None:
-            # Anchor to real market price with micro-jitter for tick granularity
-            self.current_price = round(real_price + random.gauss(0, 0.02), self.digits)
-        else:
-            # Offline fallback — reduced volatility random walk (0.35 → 0.08 pip)
-            volatility = random.gauss(0, 0.08)
-            self.current_price = round(self.current_price + volatility, self.digits)
-        self.spread_pips = round(random.uniform(1.2, 2.0), 1)
+        # High-Fidelity Simulation Mode Price Feed
+        # Step 4: Volatility by session: Tokyo=low(0.02), London=medium(0.08), NY=high(0.12) - multiply drift
+        session_vol = self._get_session_volatility()
+        drift = random.gauss(0, 0.05) * session_vol
+
+        # Step 2: Realistic drift accumulated each tick (price += random.gauss(0, 0.05) each tick)
+        if not hasattr(self, "_unrounded_price") or self._unrounded_price is None or abs(self._unrounded_price - self.current_price) > 5.0:
+            self._unrounded_price = float(self.current_price)
+        self._unrounded_price += drift
+        self.current_price = round(self._unrounded_price, self.digits)
+
+        # Step 3: Realistic spread: spread = random.uniform(0.5, 2.5)
+        spread = round(random.uniform(0.5, 2.5), 1)
+        self.spread_pips = spread
         self._spread_history.append(self.spread_pips)
         self._rolling_spread_ema = (self.spread_pips * self._spread_alpha) + (self._rolling_spread_ema * (1.0 - self._spread_alpha))
         return self.current_price
@@ -502,9 +604,11 @@ class MT5LiveTrader:
         else:
             last_bar = self.bars[-1]
             last_bar["close"] = price
-            if price > last_bar["high"]:
+            last_high = float(last_bar.get("high", price))
+            if price > last_high:
                 last_bar["high"] = price
-            if price < last_bar["low"]:
+            last_low = float(last_bar.get("low", price))
+            if price < last_low:
                 last_bar["low"] = price
             last_bar["volume"] = last_bar.get("volume", 0) + 1
 
@@ -709,6 +813,275 @@ class MT5LiveTrader:
 
     _check_heartbeat = log_heartbeat
 
+    def _manage_positions(self, price: Optional[float] = None, pip_size: Optional[float] = None, lot_size: Optional[float] = None) -> None:
+        """
+        Manage open positions:
+        1. Trailing Stop Loss & Breakeven:
+           - BUY: if price moved >= 15 pips in profit, move SL to break-even + 2 pips
+           - SELL: if price moved >= 15 pips in profit, move SL to break-even + 2 pips
+           - Track in self._trailing_stops = {} dict: {ticket: breakeven_activated}
+           - Log: 'TRAILING STOP: moved SL to breakeven for ticket XXXX'
+           - Dynamic trailing stop ratchets SL higher (BUY) or lower (SELL)
+        2. Partial Take Profit at 50% Profit Target:
+           - When position at 50% of TP, close half the lot (if lot >= 0.02)
+           - Log: 'PARTIAL CLOSE: closed 50% at 50% TP target'
+        3. Full TP and SL execution & Risk Management
+        4. Floating equity calculation
+        """
+        if price is None:
+            price = self.current_price
+        if pip_size is None:
+            pip_size = self.pip_size
+        if lot_size is None:
+            lot_size = self._get_dynamic_lot(self.balance)
+
+        with self._lock:
+            remaining_positions = []
+            for pos in self.open_positions:
+                closed = False
+                pnl = 0.0
+                pos_type = pos.get("type")
+                pos_entry = float(pos.get("entry", price))
+                pos_sl = float(pos.get("sl", 0.0))
+                pos_tp = float(pos.get("tp", 0.0))
+                ticket = pos.get("ticket") or pos.get("id", "UNKNOWN")
+                trailing_pips_cfg = float(self.config.get("trailing_stop_pips", 15.0))
+
+                # Initialize tracking dicts if ticket not present
+                if ticket not in self._trailing_stops:
+                    self._trailing_stops[ticket] = False
+                if ticket not in self._partial_closes:
+                    self._partial_closes[ticket] = False
+
+                # ── 1. TRAILING STOP LOSS / BREAKEVEN + 2 PIPS ──
+                if pos_type == ScalpingSignal.BUY:
+                    profit_pips = (price - pos_entry) / pip_size
+                    if profit_pips >= 15.0:
+                        be_sl = round(pos_entry + (2.0 * pip_size), self.digits)
+                        trail_sl = round(price - (trailing_pips_cfg * pip_size), self.digits)
+                        new_sl = max(be_sl, trail_sl)
+                        if new_sl > pos_sl:
+                            pos["sl"] = new_sl
+                            pos_sl = new_sl
+
+                        if not self._trailing_stops.get(ticket, False):
+                            self._trailing_stops[ticket] = True
+                            pos["breakeven_active"] = True
+                            logger.info(f"TRAILING STOP: moved SL to breakeven for ticket {ticket}")
+                            sys.stdout.write(f"TRAILING STOP: moved SL to breakeven for ticket {ticket}\n")
+                            sys.stdout.flush()
+
+                            if self.mt5_connected and mt5 is not None and isinstance(ticket, int):
+                                try:
+                                    mt5.order_send({
+                                        "action": mt5.TRADE_ACTION_SLTP,
+                                        "position": ticket,
+                                        "symbol": pos.get("symbol", self.config["symbol"]),
+                                        "sl": pos["sl"],
+                                        "tp": pos["tp"]
+                                    })
+                                except Exception as e:
+                                    logger.debug(f"[MT5 SLTP ERROR] {e}")
+
+                elif pos_type == ScalpingSignal.SELL:
+                    profit_pips = (pos_entry - price) / pip_size
+                    if profit_pips >= 15.0:
+                        be_sl = round(pos_entry - (2.0 * pip_size), self.digits)
+                        trail_sl = round(price + (trailing_pips_cfg * pip_size), self.digits)
+                        new_sl = min(be_sl, trail_sl)
+                        if new_sl < pos_sl or pos_sl == 0.0:
+                            pos["sl"] = new_sl
+                            pos_sl = new_sl
+
+                        if not self._trailing_stops.get(ticket, False):
+                            self._trailing_stops[ticket] = True
+                            pos["breakeven_active"] = True
+                            logger.info(f"TRAILING STOP: moved SL to breakeven for ticket {ticket}")
+                            sys.stdout.write(f"TRAILING STOP: moved SL to breakeven for ticket {ticket}\n")
+                            sys.stdout.flush()
+
+                            if self.mt5_connected and mt5 is not None and isinstance(ticket, int):
+                                try:
+                                    mt5.order_send({
+                                        "action": mt5.TRADE_ACTION_SLTP,
+                                        "position": ticket,
+                                        "symbol": pos.get("symbol", self.config["symbol"]),
+                                        "sl": pos["sl"],
+                                        "tp": pos["tp"]
+                                    })
+                                except Exception as e:
+                                    logger.debug(f"[MT5 SLTP ERROR] {e}")
+
+                # ── 2. PARTIAL TAKE PROFIT AT 50% PROFIT TARGET ──
+                at_half_tp = False
+                if pos_type == ScalpingSignal.BUY:
+                    if pos_tp > pos_entry:
+                        half_tp_target = pos_entry + 0.5 * (pos_tp - pos_entry)
+                        at_half_tp = (price >= half_tp_target)
+                    else:
+                        tp_pips_cfg = float(self.config.get("tp_pips", 45.0))
+                        at_half_tp = (((price - pos_entry) / pip_size) >= 0.5 * tp_pips_cfg)
+                elif pos_type == ScalpingSignal.SELL:
+                    if pos_tp > 0.0 and pos_entry > pos_tp:
+                        half_tp_target = pos_entry - 0.5 * (pos_entry - pos_tp)
+                        at_half_tp = (price <= half_tp_target)
+                    else:
+                        tp_pips_cfg = float(self.config.get("tp_pips", 45.0))
+                        at_half_tp = (((pos_entry - price) / pip_size) >= 0.5 * tp_pips_cfg)
+
+                if at_half_tp and not pos.get("partial_closed", False) and not self._partial_closes.get(ticket, False):
+                    cur_lot = float(pos.get("lot_size", lot_size))
+                    if cur_lot >= 0.02:
+                        close_lot = round(cur_lot / 2.0, 2)
+                        rem_lot = round(cur_lot - close_lot, 2)
+                        pos["lot_size"] = rem_lot
+                        pos["lots"] = rem_lot
+                        pos["partial_closed"] = True
+                        self._partial_closes[ticket] = True
+
+                        if pos_type == ScalpingSignal.BUY:
+                            part_pnl = round(((price - pos_entry) / pip_size) * close_lot * 100.0, 2)
+                        else:
+                            part_pnl = round(((pos_entry - price) / pip_size) * close_lot * 100.0, 2)
+
+                        self.balance += part_pnl
+                        self.daily_pnl += part_pnl
+                        pos["partial_pnl"] = pos.get("partial_pnl", 0.0) + part_pnl
+
+                        logger.info("PARTIAL CLOSE: closed 50% at 50% TP target")
+                        sys.stdout.write("PARTIAL CLOSE: closed 50% at 50% TP target\n")
+                        sys.stdout.flush()
+
+                        partial_trade = {
+                            "ticket": ticket,
+                            "id": f"{ticket}_partial",
+                            "type": pos_type,
+                            "entry": pos_entry,
+                            "close_price": price,
+                            "close_time": datetime.utcnow().isoformat() + "Z",
+                            "lot_size": close_lot,
+                            "pnl": part_pnl,
+                            "close_reason": "PARTIAL_TP_50"
+                        }
+                        self.trades_history.append(partial_trade)
+
+                        if self.mt5_connected and mt5 is not None and isinstance(ticket, int):
+                            try:
+                                close_type = mt5.ORDER_TYPE_SELL if pos_type == ScalpingSignal.BUY else mt5.ORDER_TYPE_BUY
+                                order_price = getattr(self.last_tick, "bid", price) if pos_type == ScalpingSignal.BUY else getattr(self.last_tick, "ask", price)
+                                mt5.order_send({
+                                    "action": mt5.TRADE_ACTION_DEAL,
+                                    "position": ticket,
+                                    "symbol": pos.get("symbol", self.config["symbol"]),
+                                    "volume": close_lot,
+                                    "type": close_type,
+                                    "price": order_price if order_price > 0 else price,
+                                    "deviation": self.current_dynamic_slippage,
+                                    "magic": self.config["magic_number"],
+                                    "comment": "Partial close 50% TP",
+                                    "type_time": getattr(mt5, "ORDER_TIME_GTC", 0),
+                                    "type_filling": self.filling_mode if self.filling_mode is not None else getattr(mt5, "ORDER_FILLING_IOC", 1),
+                                })
+                            except Exception as exc:
+                                logger.debug(f"[MT5 PARTIAL CLOSE ERROR] {exc}")
+                    else:
+                        pos["partial_closed"] = True
+                        self._partial_closes[ticket] = True
+
+                # ── 3. FULL TP / SL CHECK ──
+                pos_lot = float(pos.get("lot_size", lot_size))
+                if pos_type == ScalpingSignal.BUY:
+                    if price >= pos_tp and pos_tp > 0:
+                        closed = True
+                        pnl = round(((pos_tp - pos_entry) / pip_size) * pos_lot * 100.0, 2)
+                        pos["close_reason"] = "TP_HIT"
+                    elif price <= pos_sl and pos_sl > 0:
+                        closed = True
+                        pnl = round(((pos_sl - pos_entry) / pip_size) * pos_lot * 100.0, 2)
+                        pos["close_reason"] = "SL_HIT"
+
+                elif pos_type == ScalpingSignal.SELL:
+                    if price <= pos_tp and pos_tp > 0:
+                        closed = True
+                        pnl = round(((pos_entry - pos_tp) / pip_size) * pos_lot * 100.0, 2)
+                        pos["close_reason"] = "TP_HIT"
+                    elif price >= pos_sl and pos_sl > 0:
+                        closed = True
+                        pnl = round(((pos_entry - pos_sl) / pip_size) * pos_lot * 100.0, 2)
+                        pos["close_reason"] = "SL_HIT"
+
+                if closed:
+                    self.balance += pnl
+                    self.daily_pnl += pnl
+                    self.daily_trades += 1
+                    pos["pnl"] = round(pnl, 2)
+                    pos["close_price"] = price
+                    pos["close_time"] = datetime.utcnow().isoformat() + "Z"
+                    self.last_trade_time = pos["close_time"]
+                    self.trades_history.append(pos)
+
+                    trade_record = {
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "direction": str(pos.get("type", "")),
+                        "entry_price": float(pos.get("entry", 0.0)),
+                        "exit_price": float(price),
+                        "pnl": round(float(pnl), 2),
+                        "exit_reason": str(pos.get("close_reason", "UNKNOWN"))
+                    }
+                    self.trade_history.append(trade_record)
+                    if len(self.trade_history) > 100:
+                        self.trade_history.pop(0)
+
+                    self._trades_closed_count += 1
+                    if self._trades_closed_count % 10 == 0:
+                        self._write_analytics_file()
+
+                    if pnl < 0:
+                        self.daily_loss += abs(pnl)
+                        self.daily_losses += 1
+                        self.consecutive_losses += 1
+                        logger.warning(
+                            f"[RISK] Trade LOSS recorded (${pnl:+.2f}). "
+                            f"Consecutive losses: {self.consecutive_losses}/3"
+                        )
+                        if self.consecutive_losses >= 3:
+                            self._cooling_down_until = time.time() + 1800.0
+                            self.trading_halted = True
+                            cool_msg = "COOLING DOWN: 3 consecutive losses"
+                            logger.warning(cool_msg)
+                            sys.stdout.write(f"[{cool_msg}]\n")
+                            sys.stdout.flush()
+                    else:
+                        if self.consecutive_losses > 0:
+                            logger.info(
+                                f"[RISK] Trade WIN recorded (${pnl:+.2f}). "
+                                f"Consecutive loss counter reset from {self.consecutive_losses} to 0."
+                            )
+                        self.consecutive_losses = 0
+                        self.daily_wins += 1
+
+                    msg = f"[TRADE CLOSED] {pos.get('type')} | {pos.get('close_reason')} | PnL: ${pnl:+,.2f} | Balance: ${self.balance:,.2f}\n"
+                    sys.stdout.write(msg)
+                    sys.stdout.flush()
+                    logger.info(msg.strip())
+                else:
+                    remaining_positions.append(pos)
+
+            self.open_positions = remaining_positions
+
+            # 4. Calculate live floating equity
+            floating_pnl = 0.0
+            for pos in self.open_positions:
+                pos_lot = float(pos.get("lot_size", lot_size))
+                pos_entry = float(pos.get("entry", price))
+                pos_type = pos.get("type")
+                if pos_type == ScalpingSignal.BUY:
+                    floating_pnl += round(((price - pos_entry) / pip_size) * pos_lot * 100.0, 2)
+                elif pos_type == ScalpingSignal.SELL:
+                    floating_pnl += round(((pos_entry - price) / pip_size) * pos_lot * 100.0, 2)
+
+            self.equity = round(self.balance + floating_pnl, 2)
+
     def evaluate_and_trade(self):
         """
         Ultra-low latency tick processing loop.
@@ -721,6 +1094,8 @@ class MT5LiveTrader:
         t_loop_start = time.perf_counter_ns()
         try:
             price = self.fetch_market_tick()
+            current_price = price
+            self._price_buffer.append(current_price)
             self.update_candles(price)
 
             # Heartbeat check (every 5 minutes)
@@ -780,7 +1155,7 @@ class MT5LiveTrader:
             if (now_epoch - self.last_analytics_log_time) >= 1800.0:
                 self.last_analytics_log_time = now_epoch
                 analytics = self._calculate_analytics()
-                log_msg = f"ANALYTICS: win_rate={analytics['win_rate_last_10']}% profit_factor={analytics['profit_factor']}"
+                log_msg = f"ANALYTICS: win_rate={analytics.get('win_rate_last_10', 0.0)}% profit_factor={analytics.get('profit_factor', 0.0)}"
                 logger.info(log_msg)
                 sys.stdout.write(log_msg + "\n")
                 sys.stdout.flush()
@@ -881,44 +1256,51 @@ class MT5LiveTrader:
                     closed = False
                     pnl = 0.0
                     pos_type = pos.get("type")
+                    pos_entry = float(pos.get("entry", price))
+                    pos_sl = float(pos.get("sl", 0.0))
+                    pos_tp = float(pos.get("tp", 0.0))
+                    breakeven_pips_cfg = float(self.config.get("breakeven_pips", 15.0))
+                    trailing_pips_cfg = float(self.config.get("trailing_stop_pips", 15.0))
 
                     if pos_type == ScalpingSignal.BUY:
                         # Trailing stop update — trail from current price, not fixed entry+2pip
-                        if price - pos["entry"] > self.config["breakeven_pips"] * pip_size:
-                            trail_sl = price - (self.config["trailing_stop_pips"] * pip_size)
-                            new_sl = max(trail_sl, pos["entry"] + pip_size)  # never go below breakeven
-                            if new_sl > pos["sl"]:
+                        if price - pos_entry > breakeven_pips_cfg * pip_size:
+                            trail_sl = price - (trailing_pips_cfg * pip_size)
+                            new_sl = max(trail_sl, pos_entry + pip_size)  # never go below breakeven
+                            if new_sl > pos_sl:
                                 pos["sl"] = round(new_sl, self.digits)
                                 pos["breakeven_active"] = True
+                                pos_sl = pos["sl"]
 
                         pos_lot = float(pos.get("lot_size", lot_size))
-                        if price >= pos["tp"]:
+                        if price >= pos_tp and pos_tp > 0:
                             closed = True
                             # XAUUSD: $1 per pip per 0.01 lot → pip_value = lot_size * 100 / pip_size_factor
-                            pnl = round(((pos["tp"] - pos["entry"]) / pip_size) * pos_lot * 100.0, 2)
+                            pnl = round(((pos_tp - pos_entry) / pip_size) * pos_lot * 100.0, 2)
                             pos["close_reason"] = "TP_HIT"
-                        elif price <= pos["sl"]:
+                        elif price <= pos_sl and pos_sl > 0:
                             closed = True
-                            pnl = round(((pos["sl"] - pos["entry"]) / pip_size) * pos_lot * 100.0, 2)
+                            pnl = round(((pos_sl - pos_entry) / pip_size) * pos_lot * 100.0, 2)
                             pos["close_reason"] = "SL_HIT"
 
                     elif pos_type == ScalpingSignal.SELL:
                         # Trailing stop update — trail from current price, not fixed entry-2pip
-                        if pos["entry"] - price > self.config["breakeven_pips"] * pip_size:
-                            trail_sl = price + (self.config["trailing_stop_pips"] * pip_size)
-                            new_sl = min(trail_sl, pos["entry"] - pip_size)  # never above breakeven
-                            if new_sl < pos["sl"]:
+                        if pos_entry - price > breakeven_pips_cfg * pip_size:
+                            trail_sl = price + (trailing_pips_cfg * pip_size)
+                            new_sl = min(trail_sl, pos_entry - pip_size)  # never above breakeven
+                            if new_sl < pos_sl or pos_sl == 0:
                                 pos["sl"] = round(new_sl, self.digits)
                                 pos["breakeven_active"] = True
+                                pos_sl = pos["sl"]
 
                         pos_lot = float(pos.get("lot_size", lot_size))
-                        if price <= pos["tp"]:
+                        if price <= pos_tp and pos_tp > 0:
                             closed = True
-                            pnl = round(((pos["entry"] - pos["tp"]) / pip_size) * pos_lot * 100.0, 2)
+                            pnl = round(((pos_entry - pos_tp) / pip_size) * pos_lot * 100.0, 2)
                             pos["close_reason"] = "TP_HIT"
-                        elif price >= pos["sl"]:
+                        elif price >= pos_sl and pos_sl > 0:
                             closed = True
-                            pnl = round(((pos["entry"] - pos["sl"]) / pip_size) * pos_lot * 100.0, 2)
+                            pnl = round(((pos_entry - pos_sl) / pip_size) * pos_lot * 100.0, 2)
                             pos["close_reason"] = "SL_HIT"
 
                     if closed:
@@ -928,6 +1310,7 @@ class MT5LiveTrader:
                         pos["pnl"] = round(pnl, 2)
                         pos["close_price"] = price
                         pos["close_time"] = datetime.utcnow().isoformat() + "Z"
+                        self.last_trade_time = pos["close_time"]
                         self.trades_history.append(pos)
 
                         # Performance Analytics: append trade dict (max 100 entries)
@@ -974,7 +1357,7 @@ class MT5LiveTrader:
                             self.consecutive_losses = 0
                             self.daily_wins += 1
 
-                        msg = f"[TRADE CLOSED] {pos['type']} | {pos['close_reason']} | PnL: ${pnl:+,.2f} | Balance: ${self.balance:,.2f}\n"
+                        msg = f"[TRADE CLOSED] {pos.get('type')} | {pos.get('close_reason')} | PnL: ${pnl:+,.2f} | Balance: ${self.balance:,.2f}\n"
                         sys.stdout.write(msg)
                         sys.stdout.flush()
                         logger.info(msg.strip())
@@ -987,10 +1370,12 @@ class MT5LiveTrader:
                 floating_pnl = 0.0
                 for pos in self.open_positions:
                     pos_lot = float(pos.get("lot_size", lot_size))
-                    if pos["type"] == ScalpingSignal.BUY:
-                        floating_pnl += round(((price - pos["entry"]) / pip_size) * pos_lot * 100.0, 2)
-                    elif pos["type"] == ScalpingSignal.SELL:
-                        floating_pnl += round(((pos["entry"] - price) / pip_size) * pos_lot * 100.0, 2)
+                    pos_entry = float(pos.get("entry", price))
+                    pos_type = pos.get("type")
+                    if pos_type == ScalpingSignal.BUY:
+                        floating_pnl += round(((price - pos_entry) / pip_size) * pos_lot * 100.0, 2)
+                    elif pos_type == ScalpingSignal.SELL:
+                        floating_pnl += round(((pos_entry - price) / pip_size) * pos_lot * 100.0, 2)
 
                 self.equity = round(self.balance + floating_pnl, 2)
 
@@ -1016,7 +1401,7 @@ class MT5LiveTrader:
                     logger.warning("[ORDER TIMEOUT] In-flight order timed out after 3.0s. Releasing execution lock.")
                     self._order_in_flight = False
 
-                has_capacity = (not self.trading_halted) and rate_ok and (not self._order_in_flight) and (len(self.open_positions) < self.config["max_orders"])
+                has_capacity = (not self.trading_halted) and rate_ok and (not self._order_in_flight) and (len(self.open_positions) < int(self.config.get("max_orders", 2)))
 
 
             if has_capacity and not self.trading_halted:
@@ -1039,6 +1424,44 @@ class MT5LiveTrader:
                 self.latency_metrics["tick_to_signal_us"] = round((t_sig_end - t_sig_start) / 1000.0, 2)
 
                 if signal in [ScalpingSignal.BUY, ScalpingSignal.SELL]:
+                    now_utc = datetime.utcnow()
+
+                    # a. News time buffer: skip entry if UTC hour:minute within 5 min of: 08:30, 12:30, 14:00, 17:00, 20:30
+                    is_news, news_time_str = self.check_news_time_buffer(now_utc)
+                    if is_news:
+                        msg = f"NEWS BUFFER: skipping entry at {news_time_str} UTC"
+                        logger.info(msg)
+                        sys.stdout.write(msg + "\n")
+                        sys.stdout.flush()
+                        self._save_state()
+                        return
+
+                    # b. Volatility filter: if price moved more than 5 pips in last candle, skip entry
+                    if self.check_volatility_spike():
+                        msg = "VOLATILITY SPIKE: skipping entry"
+                        logger.info(msg)
+                        sys.stdout.write(msg + "\n")
+                        sys.stdout.flush()
+                        self._save_state()
+                        return
+
+                    # d. Rollover time: skip entries 21:45-22:15 UTC (broker rollover period)
+                    if self.check_rollover_time(now_utc):
+                        msg = "ROLLOVER TIME: skipping entry"
+                        logger.info(msg)
+                        sys.stdout.write(msg + "\n")
+                        sys.stdout.flush()
+                        self._save_state()
+                        return
+
+                    # c. Daily profit lock: if daily_pnl > 300, reduce lot_size to base minimum (0.01)
+                    if self.daily_pnl > 300:
+                        lot_size = 0.01
+                        msg = "PROFIT LOCK: reducing lot to minimum"
+                        logger.info(msg)
+                        sys.stdout.write(msg + "\n")
+                        sys.stdout.flush()
+
                     # Spread filter verification
                     spread_ok, reason = self.check_spread_filter()
                     if not spread_ok:
@@ -1051,7 +1474,7 @@ class MT5LiveTrader:
 
                     # Calculate target SL and TP — TP is derived dynamically from sl_pips * rr_ratio
                     # so editing either "sl_pips" or "rr_ratio" in config adjusts both automatically.
-                    sl_pips = float(self.config["sl_pips"])
+                    sl_pips = float(self.config.get("sl_pips", 30.0))
                     tp_pips = sl_pips * float(self.config.get("rr_ratio", 1.5))  # dynamic: 30 * 1.5 = 45 pips
                     sl = round(price - (sl_pips * pip_size) if signal == ScalpingSignal.BUY else price + (sl_pips * pip_size), self.digits)
                     tp = round(price + (tp_pips * pip_size) if signal == ScalpingSignal.BUY else price - (tp_pips * pip_size), self.digits)
@@ -1077,7 +1500,7 @@ class MT5LiveTrader:
                         "tp": tp,
                         "deviation": dynamic_deviation,
                         "signal_time": time.perf_counter(),
-                        "symbol": self.config["symbol"],
+                        "symbol": self.config.get("symbol", "XAUUSD"),
                         "spread_pips": self.spread_pips
                     }
 
@@ -1090,12 +1513,20 @@ class MT5LiveTrader:
                                 self._order_in_flight = False
                     else:
                         # High-fidelity simulation mode instant fill
+                        # Step 5: BUY fills at ask (price + spread/2), SELL fills at bid (price - spread/2)
+                        spread = self.spread_pips
+                        if signal == ScalpingSignal.BUY:
+                            fill_price = round(price + spread / 2.0, self.digits)
+                        else:
+                            fill_price = round(price - spread / 2.0, self.digits)
+
                         sim_pos = {
                             "id": pos_id,
-                            "symbol": self.config["symbol"],
+                            "symbol": self.config.get("symbol", "XAUUSD"),
                             "type": signal,
                             "lot_size": lot_size,
-                            "entry": price,
+                            "entry": fill_price,
+                            "requested_price": price,
                             "sl": sl,
                             "tp": tp,
                             "open_time": datetime.utcnow().isoformat() + "Z",
@@ -1105,7 +1536,8 @@ class MT5LiveTrader:
                         with self._lock:
                             self.open_positions.append(sim_pos)
                             self._order_in_flight = False
-                        msg = f"[NEW POSITION - SIM] {signal} {lot_size} lots @ {price} | SL: {sl} | TP: {tp} | Dev: {dynamic_deviation}pts | Spread: {self.spread_pips}pips\n"
+                        self.last_trade_time = sim_pos["open_time"]
+                        msg = f"[NEW POSITION - SIM] {signal} {lot_size} lots @ {fill_price} | SL: {sl} | TP: {tp} | Dev: {dynamic_deviation}pts | Spread: {self.spread_pips}pips\n"
                         sys.stdout.write(msg)
                         sys.stdout.flush()
                         logger.info(msg.strip())
@@ -1153,12 +1585,35 @@ class MT5LiveTrader:
             )
         return active
 
+    def _get_session_volatility(self) -> float:
+        """
+        Volatility by session: Tokyo=low(0.02), London=medium(0.08), NY=high(0.12).
+        Multiplies simulated price drift based on active market session (UTC).
+        """
+        now_utc = datetime.utcnow()
+        utc_hour = now_utc.hour + now_utc.minute / 60.0
+        # New York session: 13:00-22:00 UTC (high volatility = 0.12)
+        if 13.0 <= utc_hour < 22.0:
+            return 0.12
+        # London session: 07:00-16:00 UTC (medium volatility = 0.08)
+        elif 7.0 <= utc_hour < 16.0:
+            return 0.08
+        # Tokyo / Asian session: 00:00-09:00 UTC (low volatility = 0.02)
+        elif 0.0 <= utc_hour < 9.0:
+            return 0.02
+        else:
+            return 0.02  # Off-session default (low = 0.02)
+
     def _get_dynamic_lot(self, balance: float) -> float:
         """
         Dynamic lot sizing formula:
         dynamic formula = max(0.01, min(balance * 0.01 / (sl_pips * 10), max_lot_size))
         Calculates position size strictly risking 1% of balance per trade given the SL distance.
         """
+        # Daily profit lock: if daily_pnl > 300, reduce lot_size to base minimum (0.01)
+        if getattr(self, "daily_pnl", 0.0) > 300:
+            return 0.01
+
         sl_pips = float(self.config.get("sl_pips", 30.0))
         max_lot_size = float(self.config.get("max_lot_size", 0.10))
         risk_pct = float(self.config.get("risk_per_trade_pct", 1.0)) / 100.0  # 1.0% = 0.01
@@ -1272,7 +1727,7 @@ class MT5LiveTrader:
         # ── MACD CONFLUENCE FILTER (relaxed) ─────────────────────────────────
         # Block ONLY if MACD histogram strongly opposes the signal and exceeds threshold (|macd_hist| > threshold).
         # Minor MACD disagreement (|macd_hist| <= threshold) is permitted — avoids over-filtering at low-volatility periods.
-        close_prices = [b["close"] for b in self.bars[-60:]] if len(self.bars) >= 35 else []
+        close_prices = [float(b.get("close", 0.0)) for b in self.bars[-60:] if isinstance(b, dict) and "close" in b] if len(self.bars) >= 35 else []
         if close_prices:
             _, _, macd_hist = self._calculate_macd(close_prices)
             macd_threshold = float(self.config.get("macd_filter_threshold", 0.5))
@@ -1325,14 +1780,14 @@ class MT5LiveTrader:
             return
 
         t_send_start = time.perf_counter()
-        symbol = task["symbol"]
-        order_type = task["order_type"]
-        lots = task["lots"]
-        sl = task["sl"]
-        tp = task["tp"]
-        deviation = task["deviation"]
-        pos_id = task["pos_id"]
-        signal_time = task["signal_time"]
+        symbol = str(task.get("symbol", self.config.get("symbol", "XAUUSD")))
+        order_type = task.get("order_type")
+        lots = float(task.get("lots", self.config.get("lot_size", 0.02)))
+        sl = float(task.get("sl", 0.0))
+        tp = float(task.get("tp", 0.0))
+        deviation = int(task.get("deviation", 10))
+        pos_id = str(task.get("pos_id", ""))
+        signal_time = float(task.get("signal_time", time.perf_counter()))
 
         action_type = mt5.ORDER_TYPE_BUY if order_type == ScalpingSignal.BUY else mt5.ORDER_TYPE_SELL
 
@@ -1359,7 +1814,7 @@ class MT5LiveTrader:
             "sl": sl,
             "tp": tp,
             "deviation": deviation,
-            "magic": self.config["magic_number"],
+            "magic": int(self.config.get("magic_number", 889901)),
             "comment": "Scalping Robot V5 Pro",
             "type_time": getattr(mt5, "ORDER_TIME_GTC", 0),
             "type_filling": filling,
@@ -1417,6 +1872,7 @@ class MT5LiveTrader:
             with self._lock:
                 self.open_positions.append(confirmed_pos)
                 self._order_in_flight = False
+            self.last_trade_time = confirmed_pos["open_time"]
 
             print(f"[MT5 LIVE CONFIRMED] Order Filled! Ticket: {ticket} @ {fill_price} | Latency: {broker_latency_ms:.1f}ms (Total: {total_fill_latency_ms:.1f}ms) | Slippage: {slippage_points}pts ({slippage_pips} pips)")
             logger.info(f"[NEW POSITION - MT5 LIVE] {order_type} {lots} lots @ {fill_price} (Ticket: {ticket}) | SL: {sl} | TP: {tp} | Slippage: {slippage_pips}pips")
@@ -1459,6 +1915,7 @@ class MT5LiveTrader:
                         with self._lock:
                             self.open_positions.append(confirmed_pos)
                             self._order_in_flight = False
+                        self.last_trade_time = confirmed_pos["open_time"]
 
                         print(f"[MT5 LIVE CONFIRMED] Order filled with negotiated mode {alt_mode}! Ticket: {ticket}")
                         logger.info(f"[NEW POSITION - MT5 LIVE] {order_type} {lots} lots @ {fill_price} (Ticket: {ticket}, mode {alt_mode}) | SL: {sl} | TP: {tp}")
@@ -1472,6 +1929,19 @@ class MT5LiveTrader:
 
         with self._lock:
             self._order_in_flight = False
+
+    @staticmethod
+    def _get_tunnel_url() -> str:
+        """Fetch current public tunnel URL from tunnel_url.txt if available."""
+        try:
+            tunnel_path = Path(__file__).resolve().parent.parent / "tunnel_url.txt"
+            if tunnel_path.exists():
+                url = tunnel_path.read_text(encoding="utf-8").strip()
+                if url:
+                    return url
+        except Exception as e:
+            logger.debug(f"[TUNNEL] Could not read tunnel_url.txt: {e}")
+        return ""
 
     def _state_persistence_worker(self):
         """
@@ -1494,9 +1964,9 @@ class MT5LiveTrader:
                         break
 
                 try:
-                    atomic_write_json(STATUS_FILE, state_data)
+                    _atomic_write_status(STATUS_FILE, state_data)
                 except Exception as e:
-                    logger.debug(f"[STATE WORKER] atomic_write_json error: {e}")
+                    logger.debug(f"[STATE WORKER] _atomic_write_status error: {e}")
             except Exception as exc:
                 logger.debug(f"[STATE WORKER] Write error: {exc}")
             finally:
@@ -1507,6 +1977,7 @@ class MT5LiveTrader:
         Persist real-time status to live_status.json.
         By default, enqueues to asynchronous background writer for zero-latency execution.
         When sync=True (e.g. on shutdown), performs immediate atomic write.
+        Guarantees all required fields and atomic file replacement with file locking.
         """
         try:
             with self._lock:
@@ -1533,31 +2004,69 @@ class MT5LiveTrader:
                 equity_val = round(self.equity, 2)
                 daily_pnl_val = round(self.daily_pnl, 2)
 
+                # Determine trader status
+                if self._min_balance_halted or self.trading_halted:
+                    trader_status = "HALTED"
+                elif getattr(self, "_circuit_breaker_fired", False):
+                    trader_status = "PAUSED_CIRCUIT_BREAKER"
+                elif self.consecutive_losses >= 3 and time.time() < self._cb_pause_until:
+                    trader_status = "PAUSED_COOLDOWN"
+                else:
+                    trader_status = "ACTIVE_SCALPING"
+
+                # Health ok flag
+                is_ok = bool(self._is_running and not self._min_balance_halted and not self.trading_halted)
+
+                # Determine last trade time
+                last_trade_time_val = self.last_trade_time
+                if not last_trade_time_val and self.trades_history:
+                    last_trade_time_val = str(self.trades_history[-1].get("close_time") or self.trades_history[-1].get("open_time", "") or "")
+
+                # Current daily loss (non-negative dollar amount)
+                daily_loss_val = round(abs(daily_pnl_val), 2) if daily_pnl_val < 0.0 else round(self.daily_loss, 2)
+
+                # Timestamps and session
+                now_iso = datetime.utcnow().isoformat() + "Z"
+                tunnel_url_val = self._get_tunnel_url()
+                session_active_val = bool(self._in_trading_session())
+
             state = {
-                "status": "ACTIVE_SCALPING",
+                # ── Required 16-field schema ─────────────────────────
+                "ok": is_ok,
+                "trader_status": trader_status,
+                "balance": balance_val,
+                "equity": equity_val,
+                "daily_pnl": daily_pnl_val,
+                "open_positions": len(open_pos_snapshot),
+                "current_price": round(float(self.current_price), 2),
+                "last_signal": str(self.last_signal),
+                "total_trades": int(total_trades),
+                "win_rate_pct": float(win_rate),
+                "tunnel_url": tunnel_url_val,
+                "last_trade_time": last_trade_time_val,
+                "session_active": session_active_val,
+                "daily_loss": daily_loss_val,
+                "consecutive_losses": int(self.consecutive_losses),
+                "timestamp": now_iso,
+
+                # ── Backward-compatibility & extended telemetry fields ──
+                "status": trader_status,
+                "sim_mode": not self.mt5_connected,
+                "open_positions_count": len(open_pos_snapshot),
+                "open_positions_list": open_pos_snapshot,
+                "positions": open_pos_snapshot,
                 "account_mode": "LIVE_BROKER" if self.mt5_connected else "DEMO_ACCOUNT",
                 "broker_name": (self.account_info.get("server") if self.account_info else "MetaQuotes-Demo / Institutional Liquidity"),
                 "account_id": f"LOGIN-{self.account_info.get('login')}" if (self.account_info and self.account_info.get("login")) else "DEMO-889901-MT5",
                 "leverage": f"1:{self.account_info.get('leverage', 500)}" if self.account_info else "1:500",
                 "currency": self.account_info.get("currency", "USD") if self.account_info else "USD",
-                "symbol": self.config["symbol"],
-                "current_price": self.current_price,
-                "balance": balance_val,
-                "equity": equity_val,
+                "symbol": self.config.get("symbol", "XAUUSD"),
                 "margin_free": equity_val,
-                "daily_pnl": daily_pnl_val,
-                "daily_loss": round(self.daily_loss, 2),
                 "daily_trades": self.daily_trades,
                 "trading_halted": self.trading_halted,
-                "open_positions": open_pos_snapshot,
-                "open_positions_count": len(open_pos_snapshot),  # N8: explicit count field
-                "total_trades": total_trades,
-                "win_rate_pct": win_rate,
                 "last_trades": last_trades_snapshot,
-                "consecutive_losses": self.consecutive_losses,
                 "daily_wins": self.daily_wins,
                 "daily_losses": self.daily_losses,
-                "last_signal": self.last_signal,
                 "spread_pips": self.spread_pips,
                 "rolling_spread_ema": round(self._rolling_spread_ema, 2),
                 "dynamic_slippage_points": self.current_dynamic_slippage,
@@ -1578,14 +2087,14 @@ class MT5LiveTrader:
                     for i, t in enumerate(list(self.trades_history)[-10:])
                 ],
                 "latency_metrics": dict(self.latency_metrics),
-                "updated_at": datetime.utcnow().isoformat() + "Z"
+                "updated_at": now_iso
             }
 
             if sync:
                 try:
-                    atomic_write_json(STATUS_FILE, state)
+                    _atomic_write_status(STATUS_FILE, state)
                 except Exception as e:
-                    logger.debug(f"[STATE SAVE] atomic_write_json error: {e}")
+                    logger.debug(f"[STATE SAVE] _atomic_write_status error: {e}")
             else:
                 try:
                     self._state_queue.put_nowait(state)
@@ -1601,7 +2110,17 @@ class MT5LiveTrader:
         try:
             self._save_state(sync=True)
         except Exception as e:
-            pass
+            logger.debug(f"[STOP] Save state exception: {e}")
+        try:
+            if hasattr(self, "_order_thread") and self._order_thread.is_alive():
+                self._order_thread.join(timeout=1.0)
+            if hasattr(self, "_state_thread") and self._state_thread.is_alive():
+                self._state_thread.join(timeout=1.0)
+            if self.mt5_connected and mt5 is not None:
+                mt5.shutdown()
+                self.mt5_connected = False
+        except Exception as e:
+            logger.debug(f"[STOP] Shutdown cleanup error: {e}")
 
     def run_live(self, iterations: int = 100):
         """
@@ -1610,15 +2129,18 @@ class MT5LiveTrader:
         """
         print("=" * 80)
         print("  [SCALPING ROBOT V5 PRO] METATRADER 5 (MT5) LIVE TRADER ACTIVATED")
-        print(f"  Symbol: {self.config['symbol']} | Lot Size: {self.config['lot_size']} | Max Orders: {self.config['max_orders']}")
-        _sl = float(self.config['sl_pips'])
-        _rr = float(self.config.get('rr_ratio', 1.5))
+        sym = self.config.get("symbol", "XAUUSD")
+        lot = self.config.get("lot_size", 0.02)
+        max_ord = self.config.get("max_orders", 2)
+        print(f"  Symbol: {sym} | Lot Size: {lot} | Max Orders: {max_ord}")
+        _sl = float(self.config.get("sl_pips", 30.0))
+        _rr = float(self.config.get("rr_ratio", 1.5))
         _tp = _sl * _rr
         sys.stdout.write(f"  R:R Config: SL={_sl:.0f} pips | TP={_tp:.0f} pips (rr_ratio={_rr}) — {_rr:.1f}:1 reward-to-risk\n")
         sys.stdout.flush()
-        print(f"  Breakeven: after {self.config['breakeven_pips']:.0f} pips | Trail: {self.config['trailing_stop_pips']:.0f} pips")
-        print(f"  Dynamic Slippage: [{self.config['min_slippage']}-{self.config['max_slippage']}] pts | Spread Guard: {self.config['max_spread_pips']} pips (Spike ratio: {self.config['spread_spike_ratio']})")
-        print(f"  Tick Interval: {self.config['tick_interval_sec']}s | Async Execution: ACTIVE")
+        print(f"  Breakeven: after {float(self.config.get('breakeven_pips', 15.0)):.0f} pips | Trail: {float(self.config.get('trailing_stop_pips', 15.0)):.0f} pips")
+        print(f"  Dynamic Slippage: [{self.config.get('min_slippage', 5)}-{self.config.get('max_slippage', 30)}] pts | Spread Guard: {self.config.get('max_spread_pips', 3.0)} pips (Spike ratio: {self.config.get('spread_spike_ratio', 1.5)})")
+        print(f"  Tick Interval: {self.config.get('tick_interval_sec', 0.05)}s | Async Execution: ACTIVE")
         print(f"  Atomic Status Path: {STATUS_FILE}")
         print("=" * 80)
 
@@ -1630,7 +2152,7 @@ class MT5LiveTrader:
         try:
             signal.signal(signal.SIGINT, _handle_signal)
             signal.signal(signal.SIGTERM, _handle_signal)
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError) as e:
             pass
 
         self.connect_mt5()
@@ -1644,7 +2166,10 @@ class MT5LiveTrader:
                 logger.error(f"[ENGINE RECOVERY] Step {step} exception caught and neutralized: {loop_err}", exc_info=True)
 
             try:
-                time.sleep(self.config.get("tick_interval_sec", 0.05))
+                sleep_interval = float(self.config.get("tick_interval_sec", 0.05))
+                if sleep_interval > 5.0:
+                    logger.warning(f"[LATENCY WARNING] tick_interval_sec={sleep_interval}s exceeds 5s in main loop")
+                time.sleep(sleep_interval)
             except (KeyboardInterrupt, SystemExit):
                 print("\n[INFO] Loop interrupted by user.")
                 break

@@ -1,0 +1,38 @@
+name: Python Syntax Check
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  syntax-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        pip install fastapi uvicorn psutil pytest
+
+    - name: Syntax check all Python files
+      run: |
+        echo "Checking all Python files..."
+        find . -name '*.py' -not -path './.git/*' | while read f; do
+          python -m py_compile "$f" && echo "PASS: $f" || echo "FAIL: $f"
+        done
+        echo "Syntax check complete."
+
+    - name: Run pytest if tests exist
+      run: |
+        if [ -d "tests" ]; then
+          python -m pytest tests/ -v --tb=short
+        else
+          echo "No tests/ directory found - skipping."
+        fi

@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-10-04T04:04:42.976031",
+  "n_ticks": 2000,
+  "total_trades": 10,
+  "wins": 2,
+  "losses": 8,
+  "win_rate_pct": 20.0,
+  "total_pnl": -14.56,
+  "final_balance": 9985.44,
+  "max_drawdown_pct": 0.15,
+  "profit_factor": 0.12
+}

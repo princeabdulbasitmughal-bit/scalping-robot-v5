@@ -28,5 +28,45 @@
         "win_rate_pct":  0,
         "grade":  "C",
         "trend":  "$0.00 (FLAT at $10000)"
+    },
+    {
+        "cycle":  42,
+        "timestamp":  "2026-10-04T08:47:03Z",
+        "balance":  10000,
+        "equity":  9837,
+        "daily_pnl":  0,
+        "win_rate_pct":  0,
+        "grade":  "C",
+        "trend":  "$0.00 (FLAT at $10000)"
+    },
+    {
+        "cycle":  43,
+        "timestamp":  "2026-10-04T08:52:14Z",
+        "balance":  9700,
+        "equity":  9413,
+        "daily_pnl":  -300,
+        "win_rate_pct":  0,
+        "grade":  "C",
+        "trend":  "-$300 (DOWN from $10000 to $9700)"
+    },
+    {
+        "cycle":  44,
+        "timestamp":  "2026-10-04T08:54:08Z",
+        "balance":  9700,
+        "equity":  9413,
+        "daily_pnl":  -300,
+        "win_rate_pct":  0,
+        "grade":  "C",
+        "trend":  "$0.00 (FLAT at $9700)"
+    },
+    {
+        "cycle":  45,
+        "timestamp":  "2026-10-04T09:02:41Z",
+        "balance":  9700,
+        "equity":  9413,
+        "daily_pnl":  -300,
+        "win_rate_pct":  0,
+        "grade":  "C",
+        "trend":  "$0.00 (FLAT at $9700)"
     }
 ]

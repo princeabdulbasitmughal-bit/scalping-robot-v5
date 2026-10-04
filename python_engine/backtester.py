@@ -194,12 +194,12 @@ class ScalpingBacktester:
                 max_drawdown_pct = dd_pct
                 
         # Metrics
-        winning_trades = [t for t in trades if t["pnl"] > 0]
-        losing_trades = [t for t in trades if t["pnl"] < 0]
+        winning_trades = [t for t in trades if float(t.get("pnl", 0.0)) > 0]
+        losing_trades = [t for t in trades if float(t.get("pnl", 0.0)) < 0]
         total_pnl = balance - initial_balance
         win_rate = (len(winning_trades) / len(trades) * 100.0) if trades else 0.0
-        gross_profit = sum(t["pnl"] for t in winning_trades)
-        gross_loss = abs(sum(t["pnl"] for t in losing_trades))
+        gross_profit = sum(float(t.get("pnl", 0.0)) for t in winning_trades)
+        gross_loss = abs(sum(float(t.get("pnl", 0.0)) for t in losing_trades))
         profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 999.0
         
         return {
