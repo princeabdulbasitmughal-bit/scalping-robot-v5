@@ -36,8 +36,10 @@ class DrawdownPause:
             self._equity_history.popleft()
 
     # ------------------------------------------------------------------
-    def is_entry_blocked(self) -> bool:
+    def is_entry_blocked(self, balance: float = None) -> bool:
         """Return True if entries should be paused due to recent drawdown."""
+        if balance is not None:
+            self.update(balance)
         now = time.time()
         if now < self._blocked_until:
             remaining = self._blocked_until - now

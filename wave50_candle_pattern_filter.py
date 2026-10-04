@@ -118,6 +118,13 @@ class CandlePatternFilter:
             return True
         return False
 
+    def get_bias(self) -> str:
+        with self._lock:
+            return self._last_bias
+
+    def is_entry_blocked(self, signal: str = "BUY") -> bool:
+        return self.is_signal_blocked(signal)
+
     def info(self) -> dict:
         with self._lock:
             return {

@@ -25,10 +25,13 @@ class WinRateGuard:
                  min_trades: int = _MIN_TRADES_TO_JUDGE,
                  win_rate_threshold: float = _WIN_RATE_THRESHOLD,
                  pause_duration_sec: float = _PAUSE_DURATION_SEC,
-                 window: int = 10):
+                 window: int = 10,
+                 threshold: float = None,
+                 pause_sec: float = None,
+                 **kwargs):
         self._min_trades = min_trades
-        self._threshold = win_rate_threshold
-        self._pause_sec = pause_duration_sec
+        self._threshold = threshold if threshold is not None else win_rate_threshold
+        self._pause_sec = pause_sec if pause_sec is not None else pause_duration_sec
         self._window = window
         self._results: deque = deque(maxlen=window)   # 1=win, 0=loss
         self._pause_until: float = 0.0

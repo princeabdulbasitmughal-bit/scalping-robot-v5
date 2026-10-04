@@ -84,6 +84,7 @@ class VolatilityBreaker:
             "long_window_ticks": self.LONG_WINDOW,
             "spike_ratio_threshold": self.SPIKE_RATIO,
             "block_seconds": self.BLOCK_SECONDS,
+            "blocked": self.is_entry_blocked(),
             "currently_blocked": self.is_entry_blocked(),
             "seconds_remaining": round(self.seconds_remaining(), 1),
             "current_atr": round(self._current_atr, 4),

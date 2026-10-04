@@ -67,14 +67,32 @@ class MATrendFilter:
     def get_ema(self) -> float:
         return self._ema
 
-    def is_signal_blocked(self, signal: str) -> bool:
+class BlockResult(int):
+    def __new__(cls, blocked: bool, reason: str = ""):
+        obj = super().__new__(cls, 1 if blocked else 0)
+        obj.blocked = bool(blocked)
+        obj.reason = reason
+        return obj
+
+    def __iter__(self):
+        yield self.blocked
+        yield self.reason
+
+    def __bool__(self):
+        return self.blocked
+
+    def __repr__(self):
+        return f"BlockResult({self.blocked}, '{self.reason}')"
+
+
+    def is_signal_blocked(self, signal: str):
         """
-        Returns True if the signal is against the EMA trend.
+        Returns BlockResult (behaves as both bool and (blocked, reason) tuple).
         During warm-up period (<50 ticks), never blocks.
         """
         try:
             if not self._warmed_up or self._ema == 0.0:
-                return False
+                return BlockResult(False, "warmup_or_zero_ema")
 
             price = self._last_price
             ema = self._ema
@@ -84,17 +102,17 @@ class MATrendFilter:
                     f"[WAVE59] MA TREND BLOCK: BUY rejected — price {price:.3f} "
                     f"< EMA50 {ema:.3f} (bearish trend)"
                 )
-                return True
+                return BlockResult(True, "price_below_ema")
             if signal == "SELL" and price > ema:
                 logger.info(
                     f"[WAVE59] MA TREND BLOCK: SELL rejected — price {price:.3f} "
                     f"> EMA50 {ema:.3f} (bullish trend)"
                 )
-                return True
-            return False
+                return BlockResult(True, "price_above_ema")
+            return BlockResult(False, "trend_aligned")
         except Exception as exc:
             logger.debug(f"[WAVE59] is_signal_blocked error: {exc}")
-            return False
+            return BlockResult(False, f"error:{exc}")
 
     # ------------------------------------------------------------------
     # Info API

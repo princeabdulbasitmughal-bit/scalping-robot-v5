@@ -7,6 +7,7 @@ Tracks which tickets have been partially closed to avoid double-firing.
 import logging
 import time
 from threading import Lock
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +42,13 @@ class PartialCloseManager:
     # ─────────────────────────────────────────────────────────────
     def check_position(
         self,
-        ticket: int,
+        ticket: Any,
         direction: str,          # 'BUY' or 'SELL'
         entry_price: float,
         current_price: float,
-        sl_price: float,
         tp_price: float,
-        lot: float,
+        sl_price: float = 0.0,
+        lot: float = 0.02,
     ) -> bool:
         """
         Returns True if a partial close should be executed NOW.
@@ -123,3 +124,4 @@ class PartialCloseManager:
 
 # Module-level singleton
 partial_close_manager = PartialCloseManager()
+PartialClose = PartialCloseManager

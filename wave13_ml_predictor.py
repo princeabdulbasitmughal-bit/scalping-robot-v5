@@ -37,6 +37,10 @@ class LinearRegressor:
         r_squared = (ss_xy ** 2 / (ss_xx * ss_yy)) if ss_yy > 0 else 0.0
         return {"slope": slope, "intercept": intercept, "r_squared": max(0.0, min(1.0, r_squared))}
 
+    def predict(self, y: list) -> dict:
+        """Alias for MLPredictor().predict(y)."""
+        return MLPredictor().predict(y)
+
 
 class MLPredictor:
     """

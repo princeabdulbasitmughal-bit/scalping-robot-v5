@@ -41,6 +41,10 @@ class GapGuard:
                 self._total_blocks += 1
         self._last_price = price
 
+    def update(self, price: float) -> None:
+        """Alias for update_price."""
+        self.update_price(price)
+
     def is_trading_allowed(self) -> tuple:
         """
         Returns (allowed: bool, reason: str).

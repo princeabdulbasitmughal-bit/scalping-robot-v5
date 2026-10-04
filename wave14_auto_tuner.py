@@ -113,12 +113,16 @@ class AutoTuner:
             logger.error(f"[TUNER] Could not save config: {e}")
 
     # ------------------------------------------------------------------
-    def analyse(self, trade_history: list) -> dict:
+    def analyse(self, trade_history: list, current_config: dict = None) -> dict:
         """
         Analyse trade history (list of dicts with keys:
             pnl, exit_reason, direction, entry_price, exit_price, lot_size, duration_sec)
         Returns a report dict with suggestions.
         """
+        if current_config is not None:
+            cfg = current_config
+        else:
+            cfg = self._load_config()
         if len(trade_history) < self.MIN_TRADES:
             return {
                 "status": "insufficient_data",

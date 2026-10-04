@@ -101,6 +101,13 @@ class SpikeFilter:
             logger.debug(f"[SPIKE FILTER] Error: {e}")
             return True, "OK"  # Fail-open: don't block on errors
 
+    def update(self, current_price: float, prev_price: float = None):
+        """Alias for check() taking either (current_price, prev_price) or single price."""
+        if prev_price is None:
+            prev_price = getattr(self, "_last_seen_price", current_price)
+        self._last_seen_price = current_price
+        return self.check(current_price, prev_price)
+
     def is_blocked(self) -> bool:
         return time.time() < self._blocked_until
 

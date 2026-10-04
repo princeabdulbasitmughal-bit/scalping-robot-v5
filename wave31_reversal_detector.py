@@ -54,13 +54,19 @@ class ReversalDetector:
         rs = avg_gain / avg_loss
         return 100.0 - (100.0 / (1.0 + rs))
 
-    def update_price(self, price: float) -> None:
-        """Push latest price tick and refresh RSI."""
+    def update(self, price: float, rsi: float = None) -> None:
+        """Push latest price tick and optional RSI."""
         self._prices.append(float(price))
-        rsi = self._compute_rsi()
-        self._rsi_history.append(rsi)
+        if rsi is not None:
+            self._rsi_history.append(float(rsi))
+        else:
+            self._rsi_history.append(self._compute_rsi())
         self._price_highs.append(float(price))
         self._price_lows.append(float(price))
+
+    def update_price(self, price: float) -> None:
+        """Push latest price tick and refresh RSI."""
+        self.update(price)
 
     def get_reversal_signal(self) -> tuple:
         """

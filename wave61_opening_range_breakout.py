@@ -97,22 +97,34 @@ class OpeningRangeBreakout:
             self._or_low = price
         self._tick_count += 1
 
-    def is_signal_blocked(self, signal: str) -> bool:
-        """
-        Returns True if the signal should be blocked.
-        signal: 'BUY' or 'SELL'
+class BlockResult(int):
+    def __new__(cls, blocked: bool, reason: str = ""):
+        obj = super().__new__(cls, 1 if blocked else 0)
+        obj.blocked = bool(blocked)
+        obj.reason = reason
+        return obj
 
-        Blocks only when:
-        - Window is complete (30 min has passed)
-        - At least MIN_TICKS recorded
-        - Price is NOT breaking out in the signal direction
+    def __iter__(self):
+        yield self.blocked
+        yield self.reason
+
+    def __bool__(self):
+        return self.blocked
+
+    def __repr__(self):
+        return f"BlockResult({self.blocked}, '{self.reason}')"
+
+
+    def is_signal_blocked(self, signal: str):
+        """
+        Returns BlockResult (behaves as both bool and (blocked, reason) tuple).
         """
         if not self._window_complete:
-            return False
+            return BlockResult(False, "window_not_complete")
         if self._tick_count < _MIN_TICKS:
-            return False
+            return BlockResult(False, "insufficient_ticks")
         if self._or_high is None or self._or_low is None:
-            return False
+            return BlockResult(False, "range_not_established")
 
         price = self._last_price
 
@@ -120,15 +132,15 @@ class OpeningRangeBreakout:
             logger.debug(
                 f"[WAVE61] ORB BUY blocked — price {price:.2f} not above OR_high {self._or_high:.2f}"
             )
-            return True
+            return BlockResult(True, "price_not_above_or_high")
 
         if signal == "SELL" and price >= self._or_low:
             logger.debug(
                 f"[WAVE61] ORB SELL blocked — price {price:.2f} not below OR_low {self._or_low:.2f}"
             )
-            return True
+            return BlockResult(True, "price_not_below_or_low")
 
-        return False
+        return BlockResult(False, "breakout_confirmed")
 
     def get_range_pips(self) -> float:
         """Return the opening range size in pips (XAUUSD: 1 pip = 0.01)."""

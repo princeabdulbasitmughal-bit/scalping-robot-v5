@@ -193,6 +193,26 @@ class RiskManager:
         except Exception:
             pass
 
+    def streak_lot_modifier(self) -> float:
+        """Returns multiplier for current win/loss streak."""
+        return 1.0
+
+    def record_result(self, won: bool) -> None:
+        """Record trade win/loss for session stats."""
+        self._session_pnl_log.append(1.0 if won else -1.0)
+
+    def is_recovery_mode(self) -> bool:
+        """Returns True if currently in drawdown recovery mode."""
+        return self._hard_halt
+
+    def session_stats(self) -> Dict[str, Any]:
+        """Returns dictionary of current session statistics."""
+        return {
+            "peak_balance": self.peak_balance,
+            "equity_ema": self._equity_ema,
+            "hard_halt": self._hard_halt,
+            "total_trades": len(self._session_pnl_log),
+        }
 
 # ── Module-level singleton ─────────────────────────────────────────────────
 risk_manager = RiskManager()

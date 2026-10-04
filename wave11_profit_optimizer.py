@@ -74,14 +74,26 @@ class ProfitOptimizer:
 
     # ── Partial profit levels ─────────────────────────────────────────────────
     def get_partial_close_level(
-        self, ticket: str, pips_profit: float, tp_pips: float, lot_size: float
+        self,
+        ticket: str,
+        pips_profit: float = 0.0,
+        tp_pips: float = 40.0,
+        lot_size: float = 0.02,
+        current_float_pnl: float = None,
+        base_lot: float = None,
+        **kwargs
     ) -> Optional[float]:
         """
         Return lot to partially close, or None if no partial close needed.
         Level 1: at 40% of TP → close 33% of position
         Level 2: at 70% of TP → close another 33%
         """
-        if lot_size < 0.03:
+        if current_float_pnl is not None:
+            pips_profit = current_float_pnl
+        if base_lot is not None:
+            lot_size = base_lot
+
+        if lot_size < 0.02:
             return None  # too small for partial close
         if self._partial_closed.get(ticket, False):
             return None  # already partially closed

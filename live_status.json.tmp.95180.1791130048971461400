@@ -1,0 +1,399 @@
+{
+  "ok": true,
+  "trader_status": "ACTIVE_SCALPING",
+  "balance": 10000.0,
+  "equity": 10000.0,
+  "daily_pnl": 0.0,
+  "open_positions": 0,
+  "current_price": 2400.04,
+  "last_signal": "HOLD",
+  "total_trades": 0,
+  "win_rate_pct": 0.0,
+  "tunnel_url": "https://06769921c87fbfc1-111-68-99-197.serveousercontent.com",
+  "last_trade_time": "",
+  "session_active": true,
+  "daily_loss": 0.0,
+  "consecutive_losses": 0,
+  "timestamp": "2026-10-04T16:07:28.951622Z",
+  "status": "ACTIVE_SCALPING",
+  "sim_mode": true,
+  "open_positions_count": 0,
+  "open_positions_list": [],
+  "positions": [],
+  "account_mode": "DEMO_ACCOUNT",
+  "broker_name": "MetaQuotes-Demo / Institutional Liquidity",
+  "account_id": "DEMO-889901-MT5",
+  "leverage": "1:500",
+  "currency": "USD",
+  "symbol": "XAUUSD",
+  "margin_free": 10000.0,
+  "daily_trades": 0,
+  "trading_halted": false,
+  "last_trades": [],
+  "daily_wins": 0,
+  "daily_losses": 0,
+  "spread_pips": 1.1,
+  "rolling_spread_ema": 1.45,
+  "dynamic_slippage_points": 10,
+  "mt5_connected": false,
+  "broker_login": "DEMO-889901-MT5",
+  "broker_server": "MetaQuotes-Demo",
+  "recent_trades": [],
+  "latency_metrics": {
+    "tick_to_signal_us": 56.0,
+    "signal_to_dispatch_us": 0.0,
+    "order_execution_ms": 0.0,
+    "total_fill_latency_ms": 0.0,
+    "avg_tick_loop_us": 3370.43,
+    "ticks_processed": 27,
+    "last_slippage_pips": 0.0,
+    "avg_slippage_pips": 0.0,
+    "dynamic_slippage_points": 10
+  },
+  "market_regime": "RANGING",
+  "mtf_bias": "BULL",
+  "bb_squeeze": true,
+  "ema_cross": "SELL",
+  "kelly_win_rate": 0.0,
+  "updated_at": "2026-10-04T16:07:28.951622Z",
+  "ml_prediction": {
+    "direction": "NEUTRAL",
+    "confidence": 2,
+    "slope": 0.010481,
+    "r_squared": 0.0768,
+    "momentum": -0.000175,
+    "atr_norm_slope": 0.0603
+  },
+  "spike_filter": {
+    "blocked": false,
+    "blocked_until_sec": 0,
+    "spikes_in_5min": 0,
+    "avg_tick_change": 0.0
+  },
+  "news_guard": {
+    "avoid_trading": false,
+    "reason": "news_status.json not found \u2014 allow",
+    "blocked_total": 0
+  },
+  "equity_curve_halt": {
+    "halted": false,
+    "halt_count": 0,
+    "halt_reason": "",
+    "window_pnl_sum": 0.0,
+    "consecutive_wins": 0,
+    "trades_in_window": 0
+  },
+  "spread_optimizer": {
+    "last_spread_pips": 2.4,
+    "session": "CLOSED",
+    "limit_pips": 2.12,
+    "accepted": 1,
+    "rejected": 1
+  },
+  "daily_profit_lock": {
+    "protect_mode": false,
+    "profit_target_usd": 150.0,
+    "peak_daily_pnl": 0.0,
+    "engagements": 0,
+    "protect_lot": 0.01,
+    "protect_min_score": 70
+  },
+  "drawdown_accelerator": {
+    "consec_losses": 0,
+    "consec_wins": 0,
+    "lot_multiplier": 1.0,
+    "total_reductions": 0,
+    "mode": "FULL_SIZE"
+  },
+  "time_filter": {
+    "trading_allowed": true,
+    "reason": "",
+    "total_blocks": 0,
+    "next_release_in_min": 53,
+    "block_before_min": 30,
+    "block_after_min": 30
+  },
+  "correlation_guard": {
+    "in_cooldown": false,
+    "cooldown_remaining_sec": 0.0,
+    "signals_in_window": 0,
+    "window_sec": 30.0,
+    "max_signals": 3,
+    "total_triggers": 0
+  },
+  "momentum_confirmation": {
+    "buffer_size": 6,
+    "up_ticks": 5,
+    "down_ticks": 3,
+    "total_ticks": 5,
+    "min_required": 3,
+    "total_rejections": 0
+  },
+  "adaptive_tp": {
+    "current_atr": 0.006,
+    "tp_multiplier": 1.0,
+    "mode": "NEUTRAL",
+    "total_adjustments": 0,
+    "buffer_size": 21,
+    "atr_high_threshold": 0.15,
+    "atr_low_threshold": 0.04
+  },
+  "session_lot_booster": {
+    "in_overlap_window": false,
+    "overlap_hours_utc": "12:00-15:00",
+    "boost_multiplier": 1.2,
+    "min_vol_index_required": 1.3,
+    "min_win_rate_required": 55.0,
+    "currently_boosted": false,
+    "total_boosts": 0,
+    "utc_hour": 16
+  },
+  "reversal_detector": {
+    "current_rsi": 80.0,
+    "overbought_threshold": 75.0,
+    "oversold_threshold": 25.0,
+    "last_signal": "HOLD",
+    "total_reversals": 0,
+    "cooldown_sec": 60.0,
+    "buffer_size": 15
+  },
+  "gap_guard": {
+    "trading_allowed": true,
+    "reason": "no_gap",
+    "last_gap_pips": 0.0,
+    "block_duration_sec": 120.0,
+    "cooldown_remaining_sec": 0.0,
+    "total_gaps_detected": 0,
+    "total_trade_blocks": 0,
+    "gap_threshold_pips": 5.0
+  },
+  "partial_close_manager": {
+    "trigger_pct": 0.5,
+    "close_ratio": 0.5,
+    "total_partials_executed": 0,
+    "total_pips_locked_approx": 0.0,
+    "tracked_tickets": 0
+  },
+  "trailing_stop_manager": {
+    "profit_trigger_pips": 15.0,
+    "trail_pips": 10.0,
+    "currently_trailing": 0,
+    "total_trails_activated": 0,
+    "total_sl_moves": 0
+  },
+  "overnight_guard": {
+    "friday_block_hour_utc": 20,
+    "friday_block_minute_utc": 30,
+    "rollover_window_utc": "21:45-22:15",
+    "friday_block_active": false,
+    "rollover_block_active": false,
+    "force_close_triggered": false,
+    "total_weekend_blocks": 0,
+    "total_rollover_blocks": 0,
+    "total_force_closes": 0
+  },
+  "spread_momentum_guard": {
+    "spike_ratio_threshold": 3.0,
+    "window_ticks": 5,
+    "block_seconds": 60,
+    "currently_blocked": false,
+    "seconds_remaining": 0.0,
+    "last_spread_pips": 0.0,
+    "last_spike_ratio": 0.0,
+    "total_spikes_detected": 0,
+    "total_blocks": 0
+  },
+  "entry_cooldown": {
+    "cooldown_win_sec": 60,
+    "cooldown_loss_sec": 120,
+    "currently_blocked": false,
+    "seconds_remaining": 0.0,
+    "last_trade_result": "NONE",
+    "last_cooldown_reason": "NONE",
+    "total_cooldowns_triggered": 0,
+    "total_win_cooldowns": 0,
+    "total_loss_cooldowns": 0
+  },
+  "volatility_breaker": {
+    "short_window_ticks": 20,
+    "long_window_ticks": 100,
+    "spike_ratio_threshold": 2.5,
+    "block_seconds": 90,
+    "blocked": false,
+    "currently_blocked": false,
+    "seconds_remaining": 0.0,
+    "current_atr": 0.006,
+    "baseline_atr": 0.0067,
+    "last_ratio": 0.9,
+    "total_spikes": 0,
+    "total_blocks": 0
+  },
+  "drawdown_pause": {
+    "blocked": false,
+    "blocked_until": 0.0,
+    "seconds_remaining": 0.0,
+    "drawdown_pct": 0.0,
+    "peak_equity": 0.0,
+    "current_equity": 0.0,
+    "history_points": 0,
+    "last_reason": ""
+  },
+  "profit_target_shift": {
+    "mode": "NORMAL",
+    "tp_factor": 1.0,
+    "tighten_threshold_usd": 150.0,
+    "loosen_threshold_usd": -100.0
+  },
+  "session_spread_limiter": {
+    "session": "default",
+    "spread_pips": 0.0,
+    "limit_pips": 3.0,
+    "blocked_count_total": 0
+  },
+  "tick_volume_filter": {
+    "tick_rate_per_sec": 2.8,
+    "window_sec": 10.0,
+    "min_ticks_required": 4,
+    "total_ticks_tracked": 28,
+    "blocked_count_total": 0
+  },
+  "win_rate_guard": {
+    "win_rate_pct": 100.0,
+    "sample_size": 0,
+    "threshold_pct": 30.0,
+    "paused": false,
+    "pause_remaining_sec": 0.0
+  },
+  "price_velocity_filter": {
+    "velocity_pips": 0.0,
+    "pip_limit": 5.0,
+    "window_sec": 3.0,
+    "blocked": false
+  },
+  "london_open_booster": {
+    "london_open_active": false,
+    "window_utc": "07:00-08:00",
+    "score_discount_pct": 10.0
+  },
+  "lot_recovery_ladder": {
+    "consecutive_losses": 0,
+    "current_lot": 0.02,
+    "base_lot": 0.02,
+    "max_lot": 0.1,
+    "multiplier": 1.5,
+    "trigger": 2,
+    "recovery_active": false
+  },
+  "atr_position_sizer": {
+    "atr": 0.00571,
+    "atr_baseline": 0.00714,
+    "dynamic_sl_pips": 24.0,
+    "dynamic_tp_pips": 36.0,
+    "last_update": 1791130048.95
+  },
+  "equity_high_watermark": {
+    "watermark": 10000.0,
+    "last_equity": 10000.0,
+    "drawdown_pct": 0.0,
+    "entry_blocked": false,
+    "block_remaining_sec": 0.0
+  },
+  "spread_cost_tracker": {
+    "daily_spread_cost_usd": 0.0,
+    "total_spread_cost_usd": 0.0,
+    "max_daily_usd": 50.0,
+    "trade_count": 0,
+    "entry_blocked": false
+  },
+  "candle_pattern_filter": {
+    "last_pattern": "NORMAL",
+    "last_bias": "BULLISH",
+    "last_update": 1791130048.95
+  },
+  "session_pnl_tracker": {
+    "current_session": "NY",
+    "current_session_pnl": 0.0,
+    "loss_limit": -100.0,
+    "is_blocked": false,
+    "total_trades_recorded": 0,
+    "blocked_session_count": 0,
+    "all_session_pnl": {}
+  },
+  "rsi_ob_os_filter": {
+    "rsi": 64.71,
+    "period": 14,
+    "ob_block_threshold": 75.0,
+    "os_block_threshold": 25.0,
+    "initialized": true,
+    "update_count": 28,
+    "status": "NEUTRAL"
+  },
+  "tick_reversal_guard": {
+    "n_ticks": 5,
+    "block_duration_sec": 30,
+    "is_blocked": false,
+    "block_remaining_sec": 0.0,
+    "block_count": 0,
+    "last_reversal_direction": "",
+    "current_tick_direction": "MIXED",
+    "update_count": 28,
+    "price_buffer_size": 6
+  },
+  "max_spread_per_trade": {
+    "max_spread_pips": 2.5,
+    "current_spread_pips": 0.0,
+    "is_blocked": false,
+    "block_count": 0,
+    "allow_count": 0,
+    "update_count": 28,
+    "data_staleness_sec": 0.0
+  },
+  "balance_floor_guard": {
+    "floor_usd": 9500.0,
+    "hysteresis_usd": 50.0,
+    "current_balance": 10000.0,
+    "is_halted": false,
+    "halt_count": 0,
+    "halt_balance": 0.0,
+    "halt_day_utc": "",
+    "halted_for_sec": 0.0,
+    "update_count": 28
+  },
+  "consecutive_loss_guard": {
+    "wave": 56,
+    "name": "ConsecutiveLossGuard",
+    "consecutive_losses": 0,
+    "max_losses": 3,
+    "paused": false,
+    "pause_remaining_sec": 0.0,
+    "total_pauses": 0
+  },
+  "hourly_pnl_map": {
+    "wave": 57,
+    "name": "HourlyPnLMap",
+    "current_utc_hour": 16,
+    "current_hour_pnl_usd": 0.0,
+    "lot_multiplier": 1.0,
+    "total_trades_recorded": 0,
+    "hour_pnl_map": {}
+  },
+  "price_range_filter": {
+    "wave": 58,
+    "name": "PriceRangeFilter",
+    "day_high": 2400.04,
+    "day_low": 2399.99,
+    "range_pips": 0.5,
+    "min_range_pips": 5.0,
+    "entry_blocked": false,
+    "ticks_today": 28
+  },
+  "profit_streak_booster": {
+    "wave": 60,
+    "name": "ProfitStreakBooster",
+    "streak_length_required": 3,
+    "recent_results": [],
+    "in_confidence_mode": false,
+    "tp_multiplier": 1.0,
+    "total_boosts_activated": 0
+  }
+}

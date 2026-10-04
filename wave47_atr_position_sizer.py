@@ -30,12 +30,14 @@ class ATRPositionSizer:
         self._atr: float = 0.0
         self._atr_baseline: float = 0.0   # calibrated from first N ATR values
         self._atr_history: deque = deque(maxlen=50)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._last_update = 0.0
 
     # ------------------------------------------------------------------
-    def update(self, high: float, low: float, close: float) -> None:
+    def update(self, high: float, low: float, close: float = None) -> None:
         """Feed each tick/bar H/L/C to keep ATR current."""
+        if close is None:
+            close = (high + low) / 2.0
         with self._lock:
             self._highs.append(high)
             self._lows.append(low)
@@ -89,8 +91,8 @@ class ATRPositionSizer:
             return round(self._atr, 5)
 
     def info(self) -> dict:
+        sl, tp = self.get_sl_tp()
         with self._lock:
-            sl, tp = self.get_sl_tp()
             return {
                 "atr": round(self._atr, 5),
                 "atr_baseline": round(self._atr_baseline, 5),
