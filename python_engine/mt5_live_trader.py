@@ -104,6 +104,10 @@ try:
     from wave44_price_velocity_filter import price_velocity_filter
     from wave45_london_open_booster import london_open_booster
     from wave46_lot_recovery_ladder import lot_recovery_ladder
+    from wave47_atr_position_sizer import atr_position_sizer
+    from wave48_equity_high_watermark import equity_high_watermark
+    from wave49_spread_cost_tracker import spread_cost_tracker
+    from wave50_candle_pattern_filter import candle_pattern_filter
     _WAVES_LOADED = True
 except Exception:
     _WAVES_LOADED = False
@@ -142,6 +146,10 @@ except Exception:
     price_velocity_filter = None
     london_open_booster = None
     lot_recovery_ladder = None
+    atr_position_sizer = None
+    equity_high_watermark = None
+    spread_cost_tracker = None
+    candle_pattern_filter = None
 
 
 
@@ -1307,6 +1315,15 @@ class MT5LiveTrader:
                         except Exception:
                             pass
 
+                    # Wave 49: Record spread cost for daily spread cost tracker
+                    if _WAVES_LOADED and spread_cost_tracker is not None:
+                        try:
+                            _spread49 = float(pos.get("spread_pips", 1.5))
+                            _lot49    = float(pos.get("lot", self.lot_size))
+                            spread_cost_tracker.record_trade(_spread49, _lot49)
+                        except Exception:
+                            pass
+
                 else:
                     remaining_positions.append(pos)
 
@@ -1390,6 +1407,26 @@ class MT5LiveTrader:
             if _WAVES_LOADED and price_velocity_filter is not None:
                 try:
                     price_velocity_filter.update(current_price)
+                except Exception:
+                    pass
+            # Wave 47: Feed H/L/C to ATR position sizer (use price as approx H/L/C per tick)
+            if _WAVES_LOADED and atr_position_sizer is not None:
+                try:
+                    _h47 = getattr(self, '_last_high', current_price)
+                    _l47 = getattr(self, '_last_low', current_price)
+                    atr_position_sizer.update(_h47, _l47, current_price)
+                except Exception:
+                    pass
+            # Wave 48: Feed current equity to watermark tracker
+            if _WAVES_LOADED and equity_high_watermark is not None:
+                try:
+                    equity_high_watermark.update(self.equity)
+                except Exception:
+                    pass
+            # Wave 50: Feed current price to candle pattern filter
+            if _WAVES_LOADED and candle_pattern_filter is not None:
+                try:
+                    candle_pattern_filter.update(current_price)
                 except Exception:
                     pass
             self.update_candles(price)
@@ -1879,6 +1916,14 @@ class MT5LiveTrader:
                     if _WAVES_LOADED and profit_target_shift is not None:
                         try:
                             tp_pips = profit_target_shift.adjust_tp(tp_pips, getattr(self, 'daily_pnl', 0.0))
+                        except Exception:
+                            pass
+
+                    # Wave 47: ATR Position Sizer — dynamic SL/TP based on market volatility
+                    if _WAVES_LOADED and atr_position_sizer is not None:
+                        try:
+                            sl_pips, tp_pips = atr_position_sizer.get_sl_tp(sl_pips, tp_pips)
+                            logger.debug(f"[ATR SIZER] ATR={atr_position_sizer.get_atr():.5f} sl={sl_pips} tp={tp_pips}")
                         except Exception:
                             pass
 
@@ -2511,6 +2556,35 @@ class MT5LiveTrader:
                     return ScalpingSignal.HOLD
             except Exception as _pvf44e:
                 logger.debug(f"[PRICE VELOCITY] Error: {_pvf44e}")
+
+        # ── Wave 48: Equity High Watermark (drawdown block) ──────────────────────
+        if _WAVES_LOADED and equity_high_watermark is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if equity_high_watermark.is_entry_blocked():
+                    logger.info("[EQUITY WATERMARK] Blocked: equity dropped >2% from peak — 30-min pause")
+                    return ScalpingSignal.HOLD
+            except Exception as _ehw48e:
+                logger.debug(f"[EQUITY WATERMARK] Error: {_ehw48e}")
+
+        # ── Wave 50: Candle Pattern Filter (pattern contradiction) ────────────────
+        if _WAVES_LOADED and candle_pattern_filter is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                _sig_str = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
+                if candle_pattern_filter.is_signal_blocked(_sig_str):
+                    _cpf_info = candle_pattern_filter.info()
+                    logger.info(f"[CANDLE PATTERN] Blocked: pattern={_cpf_info.get('last_pattern')} bias={_cpf_info.get('last_bias')} contradicts {_sig_str}")
+                    return ScalpingSignal.HOLD
+            except Exception as _cpf50e:
+                logger.debug(f"[CANDLE PATTERN] Error: {_cpf50e}")
+
+        # ── Wave 49: Spread Cost Tracker (daily cap) ──────────────────────────────
+        if _WAVES_LOADED and spread_cost_tracker is not None and raw_signal != ScalpingSignal.HOLD:
+            try:
+                if spread_cost_tracker.is_entry_blocked():
+                    logger.info(f"[SPREAD COST] Blocked: daily spread cost ${spread_cost_tracker.get_daily_cost():.2f} >= cap")
+                    return ScalpingSignal.HOLD
+            except Exception as _sct49e:
+                logger.debug(f"[SPREAD COST] Error: {_sct49e}")
 
         # ── Wave 26: Time Filter (scheduled release window) ───────────────────
         if _WAVES_LOADED and wave26_time_filter is not None and raw_signal != ScalpingSignal.HOLD:
@@ -3178,6 +3252,34 @@ class MT5LiveTrader:
             if _WAVES_LOADED and lot_recovery_ladder is not None:
                 try:
                     state["lot_recovery_ladder"] = lot_recovery_ladder.info()
+                except Exception:
+                    pass
+
+            # Wave 47: Inject ATR position sizer status
+            if _WAVES_LOADED and atr_position_sizer is not None:
+                try:
+                    state["atr_position_sizer"] = atr_position_sizer.info()
+                except Exception:
+                    pass
+
+            # Wave 48: Inject equity high watermark status
+            if _WAVES_LOADED and equity_high_watermark is not None:
+                try:
+                    state["equity_high_watermark"] = equity_high_watermark.info()
+                except Exception:
+                    pass
+
+            # Wave 49: Inject spread cost tracker status
+            if _WAVES_LOADED and spread_cost_tracker is not None:
+                try:
+                    state["spread_cost_tracker"] = spread_cost_tracker.info()
+                except Exception:
+                    pass
+
+            # Wave 50: Inject candle pattern filter status
+            if _WAVES_LOADED and candle_pattern_filter is not None:
+                try:
+                    state["candle_pattern_filter"] = candle_pattern_filter.info()
                 except Exception:
                     pass
 
