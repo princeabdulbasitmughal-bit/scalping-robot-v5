@@ -1,0 +1,19 @@
+# CODEOWNERS
+# These owners will be requested for review on every PR
+
+# Global owner
+*                                   @aroob100100-commits
+
+# Risk and safety files — Claude must review
+python_engine/risk*                 @aroob100100-commits
+omnicommand_server.py               @aroob100100-commits
+config.json                         @aroob100100-commits
+.github/                            @aroob100100-commits
+
+# Data pipeline
+tools/data/                         @aroob100100-commits
+python_engine/data_loader.py        @aroob100100-commits
+
+# Docs
+docs/                               @aroob100100-commits
+README.md                           @aroob100100-commits
