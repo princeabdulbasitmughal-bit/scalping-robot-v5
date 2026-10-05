@@ -67,8 +67,8 @@ DEFAULT_LIVE_STATUS: dict = {
     "spread_pips": 0.0,
     "rolling_spread_ema": 0.0,
     "mt5_connected": False,
-    "broker_login": "DEMO-889901-MT5",
-    "broker_server": "MetaQuotes-Demo",
+    "broker_login": None,
+    "broker_server": None,
     "latency_metrics": {},
     "updated_at": "",
     "error": None,
@@ -261,23 +261,12 @@ async def health():
                 tunnel_url = t_path.read_text(encoding="utf-8").strip()
         except Exception:
             pass
-        if not tunnel_url:
-            tunnel_url = "https://e88abe4e11b946c6-111-68-99-197.serveousercontent.com"
+        # An unavailable tunnel must remain unavailable; never expose a stale or
+        # fabricated URL that could mislead operators into using the wrong host.
 
         recent_trades = live.get("recent_trades", live.get("trades_history", []))
-        if not recent_trades:
-            recent_trades = [
-                {"id": "TRD-88910", "direction": "BUY", "entry": 2398.20, "exit": 2401.45, "pnl": 65.00, "result": "WIN", "close_time": "03:19:12"},
-                {"id": "TRD-88909", "direction": "SELL", "entry": 2402.10, "exit": 2399.50, "pnl": 52.00, "result": "WIN", "close_time": "03:15:40"},
-                {"id": "TRD-88908", "direction": "BUY", "entry": 2396.80, "exit": 2400.10, "pnl": 66.00, "result": "WIN", "close_time": "03:11:05"},
-                {"id": "TRD-88907", "direction": "SELL", "entry": 2399.40, "exit": 2401.20, "pnl": -36.00, "result": "LOSS", "close_time": "03:07:22"},
-                {"id": "TRD-88906", "direction": "BUY", "entry": 2394.50, "exit": 2397.80, "pnl": 66.00, "result": "WIN", "close_time": "03:02:50"},
-                {"id": "TRD-88905", "direction": "BUY", "entry": 2392.10, "exit": 2395.30, "pnl": 64.00, "result": "WIN", "close_time": "02:58:14"},
-                {"id": "TRD-88904", "direction": "SELL", "entry": 2396.00, "exit": 2393.20, "pnl": 56.00, "result": "WIN", "close_time": "02:54:33"},
-                {"id": "TRD-88903", "direction": "BUY", "entry": 2390.40, "exit": 2393.10, "pnl": 54.00, "result": "WIN", "close_time": "02:49:18"},
-                {"id": "TRD-88902", "direction": "SELL", "entry": 2394.80, "exit": 2392.00, "pnl": 56.00, "result": "WIN", "close_time": "02:44:02"},
-                {"id": "TRD-88901", "direction": "BUY", "entry": 2389.50, "exit": 2392.20, "pnl": 54.00, "result": "WIN", "close_time": "02:39:55"},
-            ]
+        if not isinstance(recent_trades, list):
+            recent_trades = []
 
         return JSONResponse({
             "ok": True,

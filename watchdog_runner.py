@@ -16,7 +16,8 @@ try:
 except ImportError:
     psutil = None
 
-BASE         = Path(r'E:\scalping-robot-v5')
+_WINDOWS_BASE = Path(r'E:\scalping-robot-v5')
+BASE         = _WINDOWS_BASE if sys.platform == 'win32' and _WINDOWS_BASE.exists() else Path(__file__).resolve().parent
 STATUS_FILE  = BASE / 'live_status.json'
 TRADER_OUT   = BASE / 'trader_out.log'
 TRADER_ERR   = BASE / 'trader_err.log'
@@ -202,7 +203,7 @@ def detect_restart_reason(proc, age: Optional[float] = None) -> Optional[str]:
 
 def start_trader():
     cmd = [
-        'python.exe', '-m', 'python_engine.mt5_live_trader',
+        sys.executable, '-m', 'python_engine.mt5_live_trader',
         '--symbol', 'XAUUSD', '--lot', '0.02',
         '--iterations', '999999', '--interval', '0.5'
     ]
@@ -226,7 +227,7 @@ def start_trader():
 
 def start_uvicorn():
     cmd = [
-        'python.exe', '-m', 'uvicorn', 'omnicommand_server:app',
+        sys.executable, '-m', 'uvicorn', 'omnicommand_server:app',
         '--host', '0.0.0.0', '--port', str(PORT), '--log-level', 'warning'
     ]
     log(f"[UVICORN] Starting -- cmd: {' '.join(cmd)}")

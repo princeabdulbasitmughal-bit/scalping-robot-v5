@@ -2,4 +2,5 @@ fastapi
 uvicorn[standard]
 python-multipart
 pytest
+pytest-asyncio
 psutil

@@ -16,3 +16,5 @@ trades_history.json
 *.db
 *.sqlite
 mt5_session/
+.coverage
+*.tmp.*
