@@ -301,6 +301,7 @@ class MT5LiveTrader:
         self.config = {
             "symbol": "XAUUSD",
             "timeframe": "M1",
+            "trading_mode": "paper",  # live orders require explicit --mode live
             "lot_size": 0.02,           # Base lot size (floor before dynamic formula)
             "max_lot_size": 0.10,       # Hard cap: dynamic lot formula never exceeds this (max 0.10)
             "risk_per_trade_pct": 1.0,  # Max % of balance risked per trade (1.0% rule)
@@ -538,6 +539,10 @@ class MT5LiveTrader:
         market symbol selection, and broker filling mode discovery.
         Caches symbol parameters (point, digits, pip_size) to avoid repeated IPC.
         """
+        if str(self.config.get("trading_mode", "paper")).lower() != "live":
+            logger.info("[MT5] Paper-trading mode enabled; broker connection and live orders are disabled.")
+            self.mt5_connected = False
+            return False
         if not MT5_AVAILABLE or mt5 is None:
             logger.debug("[MT5] MetaTrader5 Python package not available. Running in Forward-Test mode.")
             self.mt5_connected = False
@@ -2925,6 +2930,11 @@ class MT5LiveTrader:
         Uses cached tick and parameters to eliminate redundant IPC queries.
         Handles fill confirmation, filling mode negotiation (retcode 10030), and slippage calculation.
         """
+        if str(self.config.get("trading_mode", "paper")).lower() != "live":
+            logger.info("[ORDER] Paper-trading mode: order simulated; no broker order was sent.")
+            with self._lock:
+                self._order_in_flight = False
+            return
         if not self.mt5_connected or mt5 is None:
             with self._lock:
                 self._order_in_flight = False
@@ -3596,7 +3606,8 @@ class MT5LiveTrader:
         and graceful shutdown interception.
         """
         print("=" * 80)
-        print("  [SCALPING ROBOT V5 PRO] METATRADER 5 (MT5) LIVE TRADER ACTIVATED")
+        mode = str(self.config.get("trading_mode", "paper")).upper()
+        print(f"  [SCALPING ROBOT V5 PRO] MT5 TRADER ACTIVATED — MODE: {mode}")
         sym = self.config.get("symbol", "XAUUSD")
         lot = self.config.get("lot_size", 0.02)
         max_ord = self.config.get("max_orders", 2)
@@ -3654,17 +3665,19 @@ class MT5LiveTrader:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Scalping Robot V5 Pro MT5 Live Trader")
+    parser = argparse.ArgumentParser(description="Scalping Robot V5 Pro MT5 Trader")
     parser.add_argument("--symbol", type=str, default="XAUUSD", help="Symbol to trade (default: XAUUSD)")
     parser.add_argument("--lot", type=float, default=0.02, help="Lot size (default: 0.02)")
     parser.add_argument("--iterations", type=int, default=999999, help="Number of ticks to process (default: infinite)")
     parser.add_argument("--interval", type=float, default=0.05, help="Tick polling interval in seconds (default: 0.05)")
+    parser.add_argument("--mode", choices=("paper", "live"), default="paper", help="Trading mode; paper is the safe default")
     args = parser.parse_args()
 
     trader = MT5LiveTrader({
         "symbol": args.symbol,
         "lot_size": args.lot,
-        "tick_interval_sec": args.interval
+        "tick_interval_sec": args.interval,
+        "trading_mode": args.mode,
     })
     trader.run_live(iterations=args.iterations)
 

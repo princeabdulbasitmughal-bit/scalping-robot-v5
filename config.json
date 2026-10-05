@@ -1,4 +1,5 @@
 {
+  "trading_mode": "paper",
   "sl_pips": 30.0,
   "tp_pips": 45.0,
   "rr_ratio": 1.5,

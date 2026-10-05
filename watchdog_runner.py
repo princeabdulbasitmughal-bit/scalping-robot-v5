@@ -203,7 +203,7 @@ def detect_restart_reason(proc, age: Optional[float] = None) -> Optional[str]:
 
 def start_trader():
     cmd = [
-        sys.executable, '-m', 'python_engine.mt5_live_trader',
+        sys.executable, '-m', 'python_engine.mt5_live_trader', '--mode', 'paper',
         '--symbol', 'XAUUSD', '--lot', '0.02',
         '--iterations', '999999', '--interval', '0.5'
     ]
