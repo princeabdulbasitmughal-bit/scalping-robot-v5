@@ -56,9 +56,11 @@ except ImportError as e:
 
 try:
     from .scalping_engine import ScalpingRobotV5, ScalpingSignal
+    from .signal_engine import SignalEngine
     from .storage import atomic_write_json, safe_read_json
 except ImportError as e:
     from scalping_engine import ScalpingRobotV5, ScalpingSignal
+    from signal_engine import SignalEngine
     from storage import atomic_write_json, safe_read_json
 
 # ---------------------------------------------------------------------------
@@ -352,6 +354,7 @@ class MT5LiveTrader:
         self._validate_config()
 
         # Enforce positive pip size
+        self.signal_engine = SignalEngine(self.config)
         self.robot = ScalpingRobotV5(self.config)
         self.logger = logger
         self.mt5_connected = False
@@ -2342,566 +2345,41 @@ class MT5LiveTrader:
         return "RANGING"
 
     def _get_signal(self, ind: Dict[str, Any]) -> str:
+        """Return the trading direction produced by the standalone SignalEngine.
+
+        The live trader historically consumed a string from this method, so the
+        detailed engine result is retained on ``last_signal_details`` while the
+        caller continues to receive ``BUY``, ``SELL`` or ``HOLD``.
         """
-        Wave 7 Institutional quantitative signal confluence:
-        - BB squeeze detection
-        - EMA(8/21) cross confirmation
-        - RSI divergence filter
-        - Market regime detection
-        - Multi-timeframe (1min/5min/15min) consensus
-        - MACD filter
-        """
-        close = ind.get("close", self.current_price)
-        bb_upper = ind.get("bb_upper", close + 5.0)
-        bb_lower = ind.get("bb_lower", close - 5.0)
-        bb_mid   = (bb_upper + bb_lower) / 2.0
-        fast_ema = ind.get("fast_ema", close)
-        slow_ema = ind.get("slow_ema", close)
-        rsi = ind.get("rsi", 50.0)
+        prices = [
+            float(bar["close"])
+            for bar in self.bars
+            if isinstance(bar, dict) and "close" in bar
+        ]
+        if not prices:
+            fallback = ind.get("close", self.current_price) if isinstance(ind, dict) else self.current_price
+            prices = [float(fallback)]
 
-        # Fix B3: sync robot.open_positions so max_orders check in evaluate_entry sees real positions
-        self.robot.open_positions = list(self.open_positions)
+        try:
+            result = self.signal_engine.get_signal(prices)
+        except (TypeError, ValueError, ArithmeticError) as exc:
+            logger.debug("[SIGNAL ENGINE] Unable to calculate signal: %s", exc)
+            result = {
+                "signal": ScalpingSignal.HOLD,
+                "confidence": 0.0,
+                "tier": 3,
+                "reasons": ["insufficient or invalid price data"],
+                "bb": {},
+                "rsi": 50.0,
+                "macd": {},
+                "ema_cross": "NEUTRAL",
+            }
 
-        # Consult ScalpingRobotV5 risk shields (News blackout, Volatility spike, Cooldown)
-        entry_sig = self.robot.evaluate_entry(ind, current_spread_pips=self.spread_pips)
-        if self.robot.shield_status.get("halted", False):
-            return ScalpingSignal.HOLD
-
-        # ── Wave 7: BB Squeeze Detection ─────────────────────────────────────
-        bb_width = (bb_upper - bb_lower) / bb_mid if bb_mid > 0 else 0.01
-        prev_bb_squeeze = self._bb_squeeze
-        self._bb_squeeze = bb_width < 0.002
-        if self._bb_squeeze and not prev_bb_squeeze:
-            logger.info(f"[BB SQUEEZE DETECTED] width={bb_width:.5f} — breakout likely")
-
-        # ── Wave 7: EMA(8/21) Cross Computation ──────────────────────────────
-        close_prices_all = [float(b.get("close", 0.0)) for b in self.bars[-60:] if isinstance(b, dict) and "close" in b] if len(self.bars) >= 30 else []
-        prev_ema_cross = self._ema_cross_signal
-        if len(close_prices_all) >= 21:
-            def _ema(data, period):
-                k = 2.0 / (period + 1)
-                e = data[0]
-                for v in data[1:]:
-                    e = v * k + e * (1 - k)
-                return e
-            self._ema8 = _ema(close_prices_all, 8)
-            self._ema21 = _ema(close_prices_all, 21)
-            if self._ema8 > self._ema21:
-                self._ema_cross_signal = "BUY"
-            elif self._ema8 < self._ema21:
-                self._ema_cross_signal = "SELL"
-            else:
-                self._ema_cross_signal = "NEUTRAL"
-            if self._ema_cross_signal != prev_ema_cross:
-                logger.debug(f"[EMA CROSS] EMA8={self._ema8:.3f} EMA21={self._ema21:.3f} -> {self._ema_cross_signal}")
-
-        # ── Wave 7: RSI Divergence Tracking ──────────────────────────────────
-        self._rsi_history.append(rsi)
-        self._price_highs.append(close)
-        rsi_divergence = "NONE"
-        if len(self._rsi_history) >= 5 and len(self._price_highs) >= 5:
-            rsi_list = list(self._rsi_history)
-            price_list = list(self._price_highs)
-            # Bullish divergence: price lower lows, RSI higher lows
-            if price_list[-1] < price_list[-3] and rsi_list[-1] > rsi_list[-3]:
-                rsi_divergence = "BULLISH"
-                logger.debug(f"[RSI DIVERGENCE] Bullish — price lower low, RSI higher low")
-            # Bearish divergence: price higher highs, RSI lower highs
-            elif price_list[-1] > price_list[-3] and rsi_list[-1] < rsi_list[-3]:
-                rsi_divergence = "BEARISH"
-                logger.debug(f"[RSI DIVERGENCE] Bearish — price higher high, RSI lower high")
-
-        # ── Wave 7: Market Regime Detection ──────────────────────────────────
-        price_buf_list = list(self._price_buffer) + [close]
-        self._market_regime = self._detect_market_regime(price_buf_list)
-
-        # VOLATILE regime: skip trading
-        if self._market_regime == "VOLATILE":
-            logger.debug(f"[REGIME HOLD] VOLATILE market — skipping signal")
-            return ScalpingSignal.HOLD
-
-        raw_signal = ScalpingSignal.HOLD
-        tier_hit = None  # for diagnostic logging
-
-        # ── TIER 1: Strong BB mean-reversion (price at band extremes) ──────────────────────
-        if close <= bb_lower and rsi < 55.0:
-            raw_signal = ScalpingSignal.BUY
-            tier_hit = f"T1-BB-BUY  | close={close:.3f} <= bb_lower={bb_lower:.3f}, rsi={rsi:.1f}"
-            logger.debug(f"TIER 1 triggered: {raw_signal}")
-        elif close >= bb_upper and rsi > 45.0:
-            raw_signal = ScalpingSignal.SELL
-            tier_hit = f"T1-BB-SELL | close={close:.3f} >= bb_upper={bb_upper:.3f}, rsi={rsi:.1f}"
-            logger.debug(f"TIER 1 triggered: {raw_signal}")
-
-        # ── TIER 2: EMA trend + momentum (primary scalp engine) ─────────────────────────
-        elif fast_ema > slow_ema and rsi < 65.0 and close < fast_ema * 1.0015:
-            raw_signal = ScalpingSignal.BUY
-            tier_hit = f"T2-EMA-BUY  | fast={fast_ema:.3f} > slow={slow_ema:.3f}, close={close:.3f}, rsi={rsi:.1f}"
-            logger.debug(f"TIER 2 triggered: {raw_signal}")
-        elif fast_ema < slow_ema and rsi > 35.0 and close > fast_ema * 0.9985:
-            raw_signal = ScalpingSignal.SELL
-            tier_hit = f"T2-EMA-SELL | fast={fast_ema:.3f} < slow={slow_ema:.3f}, close={close:.3f}, rsi={rsi:.1f}"
-            logger.debug(f"TIER 2 triggered: {raw_signal}")
-
-        # ── TIER 3: RSI momentum extremes (override on strong momentum) ─────────────────
-        elif rsi <= 35.0:
-            raw_signal = ScalpingSignal.BUY
-            tier_hit = f"T3-RSI-BUY  | rsi={rsi:.1f} <= 35.0"
-            logger.debug(f"TIER 3 triggered: {raw_signal}")
-        elif rsi >= 65.0:
-            raw_signal = ScalpingSignal.SELL
-            tier_hit = f"T3-RSI-SELL | rsi={rsi:.1f} >= 65.0"
-            logger.debug(f"TIER 3 triggered: {raw_signal}")
-
-        # ── TIER 4: Price vs midband + EMA agreement (widest catch-all) ────────────────
-        elif fast_ema >= slow_ema and close < bb_mid and rsi < 58.0:
-            raw_signal = ScalpingSignal.BUY
-            tier_hit = f"T4-MID-BUY  | fast={fast_ema:.3f} >= slow={slow_ema:.3f}, close={close:.3f} < bb_mid={bb_mid:.3f}, rsi={rsi:.1f}"
-            logger.debug(f"TIER 4 triggered: {raw_signal}")
-        elif fast_ema < slow_ema and close > bb_mid and rsi > 42.0:
-            raw_signal = ScalpingSignal.SELL
-            tier_hit = f"T4-MID-SELL | fast={fast_ema:.3f} < slow={slow_ema:.3f}, close={close:.3f} > bb_mid={bb_mid:.3f}, rsi={rsi:.1f}"
-            logger.debug(f"TIER 4 triggered: {raw_signal}")
-
-        # ── TIER 5: Robot entry signal fallback ─────────────────────────────────────────
-        elif entry_sig in [ScalpingSignal.BUY, ScalpingSignal.SELL]:
-            raw_signal = entry_sig
-            tier_hit = f"T5-ROBOT-{'BUY' if entry_sig == ScalpingSignal.BUY else 'SELL'} | fallback from ScalpingRobotV5.evaluate_entry"
-            logger.debug(f"TIER 5 triggered: {raw_signal}")
-
-        if raw_signal == ScalpingSignal.HOLD:
-            return ScalpingSignal.HOLD
-
-        # ── Wave 7: RSI Divergence Filter (override signal if divergence opposes) ──────
-        if rsi_divergence == "BULLISH" and raw_signal == ScalpingSignal.SELL:
-            logger.debug(f"[RSI DIV OVERRIDE] Bullish divergence detected — suppressing SELL")
-            return ScalpingSignal.HOLD
-        if rsi_divergence == "BEARISH" and raw_signal == ScalpingSignal.BUY:
-            logger.debug(f"[RSI DIV OVERRIDE] Bearish divergence detected — suppressing BUY")
-            return ScalpingSignal.HOLD
-
-        # ── Wave 7: EMA(8/21) Cross Confirmation ─────────────────────────────────────
-        if self._ema_cross_signal == "BUY" and raw_signal == ScalpingSignal.SELL:
-            logger.debug(f"[EMA CROSS FILTER] EMA8>EMA21 (bullish) — suppressing SELL")
-            return ScalpingSignal.HOLD
-        if self._ema_cross_signal == "SELL" and raw_signal == ScalpingSignal.BUY:
-            logger.debug(f"[EMA CROSS FILTER] EMA8<EMA21 (bearish) — suppressing BUY")
-            return ScalpingSignal.HOLD
-
-        # ── Wave 7: Multi-Timeframe Consensus ────────────────────────────────────────
-        mtf_votes_up = 0
-        mtf_votes_down = 0
-        if len(self._price_1min) >= 10:
-            avg_1m = sum(list(self._price_1min)[-10:]) / 10
-            if close > avg_1m:
-                mtf_votes_up += 1
-            else:
-                mtf_votes_down += 1
-        if len(self._price_5min) >= 20:
-            avg_5m = sum(list(self._price_5min)[-20:]) / 20
-            if close > avg_5m:
-                mtf_votes_up += 1
-            else:
-                mtf_votes_down += 1
-        if len(self._price_15min) >= 30:
-            avg_15m = sum(list(self._price_15min)[-30:]) / 30
-            if close > avg_15m:
-                mtf_votes_up += 1
-            else:
-                mtf_votes_down += 1
-        total_mtf = mtf_votes_up + mtf_votes_down
-        if total_mtf >= 2:
-            mtf_bias = "BULL" if mtf_votes_up > mtf_votes_down else "BEAR"
-            logger.debug(f"[MTF CHECK] up={mtf_votes_up} down={mtf_votes_down} bias={mtf_bias} signal={raw_signal}")
-            # Require 2/3 timeframes to agree with the signal
-            if raw_signal == ScalpingSignal.BUY and mtf_votes_up < 2:
-                logger.debug(f"[MTF SUPPRESSED] BUY but only {mtf_votes_up}/3 timeframes bullish")
-                return ScalpingSignal.HOLD
-            if raw_signal == ScalpingSignal.SELL and mtf_votes_down < 2:
-                logger.debug(f"[MTF SUPPRESSED] SELL but only {mtf_votes_down}/3 timeframes bearish")
-                return ScalpingSignal.HOLD
-
-        # ── MACD CONFLUENCE FILTER (relaxed) ───────────────────────────────────────
-        close_prices = [float(b.get("close", 0.0)) for b in self.bars[-60:] if isinstance(b, dict) and "close" in b] if len(self.bars) >= 35 else []
-        if close_prices:
-            _, _, macd_hist = self._calculate_macd(close_prices)
-            macd_threshold = float(self.config.get("macd_filter_threshold", 0.5))
-            if raw_signal == ScalpingSignal.BUY and macd_hist < -macd_threshold:
-                logger.debug(f"[SIGNAL SUPPRESSED] {tier_hit} | MACD hist={macd_hist:.4f} < -{macd_threshold} — strong bearish divergence")
-                return ScalpingSignal.HOLD
-            if raw_signal == ScalpingSignal.SELL and macd_hist > macd_threshold:
-                logger.debug(f"[SIGNAL SUPPRESSED] {tier_hit} | MACD hist={macd_hist:.4f} > {macd_threshold} — strong bullish divergence")
-                return ScalpingSignal.HOLD
-            logger.debug(f"[SIGNAL FIRED] {tier_hit} | MACD hist={macd_hist:.4f} regime={self._market_regime} ema_cross={self._ema_cross_signal} -> {raw_signal}")
-        else:
-            logger.debug(f"[SIGNAL FIRED] {tier_hit} | MACD skipped regime={self._market_regime} ema_cross={self._ema_cross_signal} -> {raw_signal}")
-
-        # ── Wave 20: Spike / Flash-Move Filter ───────────────────────────────
-        if _WAVES_LOADED and spike_filter is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                bars_list = list(self.bars)
-                _prev_price = (
-                    float(bars_list[-2].get("close", self.current_price))
-                    if len(bars_list) >= 2 and isinstance(bars_list[-2], dict)
-                    else self.current_price
-                )
-                _spike_ok, _spike_reason = spike_filter.check(self.current_price, _prev_price)
-                if not _spike_ok:
-                    logger.debug(f"[SPIKE FILTER] Blocked: {_spike_reason}")
-                    return ScalpingSignal.HOLD
-            except Exception as _se:
-                logger.debug(f"[SPIKE FILTER] Error: {_se}")
-
-        # ── Wave 21: News Guard ───────────────────────────────────────────────
-        if _WAVES_LOADED and news_guard is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                _news_ok, _news_reason = news_guard.is_trading_allowed()
-                if not _news_ok:
-                    logger.info(f"[NEWS GUARD] Blocked: {_news_reason}")
-                    return ScalpingSignal.HOLD
-            except Exception as _ne:
-                logger.debug(f"[NEWS GUARD] Error: {_ne}")
-
-        # ── Wave 22: Equity Curve Halt ────────────────────────────────────────
-        if _WAVES_LOADED and equity_curve_halt is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                _eq_ok, _eq_reason = equity_curve_halt.is_trading_allowed(self.balance)
-                if not _eq_ok:
-                    logger.warning(f"[EQ HALT] Blocked: {_eq_reason}")
-                    return ScalpingSignal.HOLD
-            except Exception as _eqe:
-                logger.debug(f"[EQ HALT] Error: {_eqe}")
-
-        # ── Wave 32: Gap Guard (large tick gap → 120s trading block) ──────────
-        if _WAVES_LOADED and gap_guard is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                _gg_ok, _gg_reason = gap_guard.is_trading_allowed()
-                if not _gg_ok:
-                    logger.warning(f"[GAP GUARD] Blocked: {_gg_reason}")
-                    return ScalpingSignal.HOLD
-            except Exception as _gge:
-                logger.debug(f"[GAP GUARD] Error: {_gge}")
-
-        # ── Wave 35: Overnight Guard (Friday close + rollover block) ──────────
-        if _WAVES_LOADED and overnight_guard is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if overnight_guard.is_entry_blocked():
-                    _og_reason = overnight_guard.get_reason()
-                    logger.warning(f"[OVERNIGHT GUARD] Blocked: {_og_reason}")
-                    return ScalpingSignal.HOLD
-            except Exception as _oge:
-                logger.debug(f"[OVERNIGHT GUARD] Error: {_oge}")
-
-        # ── Wave 36: Spread Momentum Guard (3x spread widening → 60s block) ──
-        if _WAVES_LOADED and spread_momentum_guard is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if spread_momentum_guard.is_entry_blocked():
-                    _smg_secs = spread_momentum_guard.seconds_remaining()
-                    logger.warning(f"[SPREAD MOMENTUM] Blocked: spread spike — {_smg_secs:.0f}s remaining")
-                    return ScalpingSignal.HOLD
-            except Exception as _smge:
-                logger.debug(f"[SPREAD MOMENTUM] Error: {_smge}")
-
-        # ── Wave 37: Entry Cooldown (post-trade cooldown) ────────────────────
-        if _WAVES_LOADED and entry_cooldown is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if entry_cooldown.is_entry_blocked():
-                    _ec_secs = entry_cooldown.seconds_remaining()
-                    logger.info(f"[ENTRY COOLDOWN] Blocked: post-trade cooldown — {_ec_secs:.0f}s remaining")
-                    return ScalpingSignal.HOLD
-            except Exception as _ece:
-                logger.debug(f"[ENTRY COOLDOWN] Error: {_ece}")
-
-        # ── Wave 38: Volatility Breaker (sustained ATR spike → 90s block) ────
-        if _WAVES_LOADED and volatility_breaker is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if volatility_breaker.is_entry_blocked():
-                    _vb_secs = volatility_breaker.seconds_remaining()
-                    logger.warning(f"[VOLATILITY BREAKER] Blocked: ATR spike — {_vb_secs:.0f}s remaining")
-                    return ScalpingSignal.HOLD
-            except Exception as _vbe:
-                logger.debug(f"[VOLATILITY BREAKER] Error: {_vbe}")
-
-        # ── Wave 39: Drawdown Pause (equity drop > 1.5% in 30min → 15min pause) ─
-        if _WAVES_LOADED and drawdown_pause is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                drawdown_pause.update(self.equity)
-                if drawdown_pause.is_entry_blocked():
-                    logger.warning("[DRAWDOWN PAUSE] Blocked: recent equity drawdown > 1.5%")
-                    return ScalpingSignal.HOLD
-            except Exception as _dp39e:
-                logger.debug(f"[DRAWDOWN PAUSE] Error: {_dp39e}")
-
-        # ── Wave 40: Profit Target Shift (adjusts TP factor based on daily PnL) ─
-        # (No gate block — this is an advisory module used during TP calculation)
-
-        # ── Wave 41: Session Spread Limiter (Tokyo/London-pre spread guard) ──────
-        if _WAVES_LOADED and session_spread_limiter is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                _cur_sp = getattr(self, '_last_spread_pips', 0.0)
-                if session_spread_limiter.is_entry_blocked(_cur_sp):
-                    logger.debug(
-                        f"[SESSION SPREAD LIMITER] Blocked: spread={_cur_sp:.2f} too wide for current session"
-                    )
-                    return ScalpingSignal.HOLD
-            except Exception as _ssl41e:
-                logger.debug(f"[SESSION SPREAD LIMITER] Error: {_ssl41e}")
-
-        # ── Wave 42: Tick Volume Filter (dead-market detection) ─────────────────
-        if _WAVES_LOADED and tick_volume_filter is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if tick_volume_filter.is_entry_blocked():
-                    logger.debug("[TICK VOLUME FILTER] Blocked: dead market — insufficient tick velocity")
-                    return ScalpingSignal.HOLD
-            except Exception as _tvf42e:
-                logger.debug(f"[TICK VOLUME FILTER] Error: {_tvf42e}")
-
-        # ── Wave 43: Win Rate Guard (losing streak pause) ────────────────────────
-        if _WAVES_LOADED and win_rate_guard is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if win_rate_guard.is_entry_blocked():
-                    logger.info("[WIN RATE GUARD] Blocked: win rate too low — losing streak pause")
-                    return ScalpingSignal.HOLD
-            except Exception as _wrg43e:
-                logger.debug(f"[WIN RATE GUARD] Error: {_wrg43e}")
-
-        # ── Wave 44: Price Velocity Filter (chasing prevention) ─────────────────
-        if _WAVES_LOADED and price_velocity_filter is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if price_velocity_filter.is_entry_blocked():
-                    logger.info("[PRICE VELOCITY] Blocked: price moving too fast — chasing prevention")
-                    return ScalpingSignal.HOLD
-            except Exception as _pvf44e:
-                logger.debug(f"[PRICE VELOCITY] Error: {_pvf44e}")
-
-        # ── Wave 48: Equity High Watermark (drawdown block) ──────────────────────
-        if _WAVES_LOADED and equity_high_watermark is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if equity_high_watermark.is_entry_blocked():
-                    logger.info("[EQUITY WATERMARK] Blocked: equity dropped >2% from peak — 30-min pause")
-                    return ScalpingSignal.HOLD
-            except Exception as _ehw48e:
-                logger.debug(f"[EQUITY WATERMARK] Error: {_ehw48e}")
-
-        # ── Wave 50: Candle Pattern Filter (pattern contradiction) ────────────────
-        if _WAVES_LOADED and candle_pattern_filter is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                _sig_str = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
-                if candle_pattern_filter.is_signal_blocked(_sig_str):
-                    _cpf_info = candle_pattern_filter.info()
-                    logger.info(f"[CANDLE PATTERN] Blocked: pattern={_cpf_info.get('last_pattern')} bias={_cpf_info.get('last_bias')} contradicts {_sig_str}")
-                    return ScalpingSignal.HOLD
-            except Exception as _cpf50e:
-                logger.debug(f"[CANDLE PATTERN] Error: {_cpf50e}")
-
-        # ── Wave 49: Spread Cost Tracker (daily cap) ──────────────────────────────
-        if _WAVES_LOADED and spread_cost_tracker is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if spread_cost_tracker.is_entry_blocked():
-                    logger.info(f"[SPREAD COST] Blocked: daily spread cost ${spread_cost_tracker.get_daily_cost():.2f} >= cap")
-                    return ScalpingSignal.HOLD
-            except Exception as _sct49e:
-                logger.debug(f"[SPREAD COST] Error: {_sct49e}")
-
-        # ── Wave 51: Session PnL Tracker (session loss limit) ─────────────────────
-        if _WAVES_LOADED and session_pnl_tracker is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if session_pnl_tracker.is_entry_blocked():
-                    logger.info("[SESSION PNL] Blocked: current session exceeded loss limit")
-                    return ScalpingSignal.HOLD
-            except Exception as _spt51e:
-                logger.debug(f"[SESSION PNL] Error: {_spt51e}")
-
-        # ── Wave 52: RSI Overbought/Oversold Filter ────────────────────────────────
-        if _WAVES_LOADED and rsi_ob_os_filter is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                _sig_str52 = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
-                if rsi_ob_os_filter.is_signal_blocked(_sig_str52):
-                    _rsi_val = rsi_ob_os_filter.get_rsi()
-                    logger.info(f"[RSI FILTER] Blocked: RSI={_rsi_val:.1f} at extreme level for {_sig_str52}")
-                    return ScalpingSignal.HOLD
-            except Exception as _rsi52e:
-                logger.debug(f"[RSI FILTER] Error: {_rsi52e}")
-
-        # ── Wave 53: Tick Reversal Guard (momentum reversal detection) ─────────────
-        if _WAVES_LOADED and tick_reversal_guard is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                _sig_str53 = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
-                if tick_reversal_guard.is_signal_blocked(_sig_str53):
-                    logger.info(f"[TICK REVERSAL] Blocked: consecutive adverse ticks detected for {_sig_str53}")
-                    return ScalpingSignal.HOLD
-            except Exception as _trg53e:
-                logger.debug(f"[TICK REVERSAL] Error: {_trg53e}")
-
-        # ── Wave 54: Max Spread Per Trade ──────────────────────────────────────────
-        if _WAVES_LOADED and max_spread_per_trade is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if max_spread_per_trade.is_entry_blocked():
-                    logger.info(f"[SPREAD CAP] Blocked: live spread {max_spread_per_trade.get_spread():.2f} pips exceeds per-trade cap")
-                    return ScalpingSignal.HOLD
-            except Exception as _msp54e:
-                logger.debug(f"[SPREAD CAP] Error: {_msp54e}")
-
-        # ── Wave 55: Balance Floor Guard (hard stop below floor) ───────────────────
-        if _WAVES_LOADED and balance_floor_guard is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if balance_floor_guard.is_entry_blocked():
-                    logger.info("[BALANCE FLOOR] Blocked: balance below minimum floor — all trading halted")
-                    return ScalpingSignal.HOLD
-            except Exception as _bfg55e:
-                logger.debug(f"[BALANCE FLOOR] Error: {_bfg55e}")
-
-        # ── Wave 56: Consecutive Loss Guard (revenge-trade spiral prevention) ────────
-        if _WAVES_LOADED and consecutive_loss_guard is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if consecutive_loss_guard.is_entry_blocked():
-                    logger.info("[CONSEC LOSS] Blocked: consecutive loss cool-down active")
-                    return ScalpingSignal.HOLD
-            except Exception as _clg56e:
-                logger.debug(f"[CONSEC LOSS] Error: {_clg56e}")
-
-        # ── Wave 58: Price Range Filter (flat/dead market detection) ──────────────────
-        if _WAVES_LOADED and price_range_filter is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                if price_range_filter.is_entry_blocked():
-                    logger.info(f"[RANGE FILTER] Blocked: daily range {price_range_filter.get_range_pips():.2f} pips — market too flat")
-                    return ScalpingSignal.HOLD
-            except Exception as _prf58e:
-                logger.debug(f"[RANGE FILTER] Error: {_prf58e}")
-
-        # ── Wave 59: MA Trend Filter (EMA-50 trend alignment) ─────────────────────────
-        if _WAVES_LOADED and ma_trend_filter is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                _sig_str59 = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
-                if ma_trend_filter.is_signal_blocked(_sig_str59):
-                    logger.info(f"[MA TREND] Blocked: {_sig_str59} against EMA50 trend")
-                    return ScalpingSignal.HOLD
-            except Exception as _mat59e:
-                logger.debug(f"[MA TREND] Error: {_mat59e}")
-
-        # ── Wave 61: Opening Range Breakout (ORB filter — only trade breakouts) ──
-        if _WAVES_LOADED and opening_range_breakout is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                _sig_str61 = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
-                if opening_range_breakout.is_signal_blocked(_sig_str61):
-                    logger.info(f"[ORB] Blocked: {_sig_str61} — price not breaking opening range")
-                    return ScalpingSignal.HOLD
-            except Exception as _orb61e:
-                logger.debug(f"[ORB] Error: {_orb61e}")
-
-        # ── Wave 26: Time Filter (scheduled release window) ───────────────────
-        if _WAVES_LOADED and wave26_time_filter is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                _tf_ok, _tf_reason = wave26_time_filter.is_trading_allowed()
-                if not _tf_ok:
-                    logger.info(f"[TIME FILTER] Blocked: {_tf_reason}")
-                    return ScalpingSignal.HOLD
-            except Exception as _tfe:
-                logger.debug(f"[TIME FILTER] Error: {_tfe}")
-
-        # ── Wave 27: Correlation Guard (choppy market burst detection) ─────────
-        if _WAVES_LOADED and correlation_guard is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                # Record this signal so the guard can track density
-                correlation_guard.record_signal()
-                _cg_ok, _cg_reason = correlation_guard.is_trading_allowed()
-                if not _cg_ok:
-                    logger.warning(f"[CORR GUARD] Blocked: {_cg_reason}")
-                    return ScalpingSignal.HOLD
-            except Exception as _cge:
-                logger.debug(f"[CORR GUARD] Error: {_cge}")
-
-        # ── Wave 28: Momentum Confirmation (ticks must move in signal direction) ─
-        if _WAVES_LOADED and momentum_confirmation is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                _sig_str = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
-                _mom_ok, _mom_reason = momentum_confirmation.is_momentum_confirmed(_sig_str)
-                if not _mom_ok:
-                    logger.debug(f"[MOMENTUM] Blocked: {_mom_reason}")
-                    return ScalpingSignal.HOLD
-            except Exception as _mome:
-                logger.debug(f"[MOMENTUM] Error: {_mome}")
-
-        # ── Wave 31: Reversal Detector (RSI divergence counter-signal) ──────────
-        if _WAVES_LOADED and reversal_detector is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                _rev_sig, _rev_conf, _rev_reason = reversal_detector.get_reversal_signal()
-                _sig_str31 = "BUY" if raw_signal == ScalpingSignal.BUY else "SELL"
-                if _rev_sig != "HOLD" and _rev_sig != _sig_str31 and _rev_conf >= 0.5:
-                    logger.warning(f"[REVERSAL] Suppressing {raw_signal}: reversal={_rev_sig} conf={_rev_conf:.2f} ({_rev_reason})")
-                    return ScalpingSignal.HOLD
-            except Exception as _reve:
-                logger.debug(f"[REVERSAL] Error: {_reve}")
-
-        # ── Wave 10: Session Quality Gate ────────────────────────────────────
-        if _WAVES_LOADED and session_optimizer is not None:
-            try:
-                sess_info = session_optimizer.get_current_session_info()
-                if not sess_info.get("tradeable", True):
-                    logger.debug(f"[SESSION GATE] {sess_info.get('reason','low quality')} — HOLD")
-                    return ScalpingSignal.HOLD
-                logger.debug(f"[SESSION OK] {sess_info.get('session','?')} vol_idx={sess_info.get('vol_index',1):.2f}")
-            except Exception as _e:
-                logger.debug(f"[SESSION GATE] error: {_e}")
-
-        # ── Wave 8: Signal Quality Score Gate (score >= 55 required, 70 in protect mode) ──
-        if _WAVES_LOADED and signal_scorer is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                closes_list = [float(b.get("close", self.current_price)) for b in list(self.bars)[-30:] if isinstance(b, dict)]
-                score = signal_scorer.score_signal(
-                    signal=raw_signal,
-                    closes=closes_list,
-                    bars=list(self.bars)[-5:],
-                    rsi=rsi,
-                    bb_squeeze=self._bb_squeeze,
-                    market_regime=self._market_regime,
-                    ema_cross=self._ema_cross_signal
-                )
-                # Wave 24: Use elevated threshold when daily profit lock is active
-                _min_score = 55
-                if _WAVES_LOADED and daily_profit_lock is not None:
-                    try:
-                        _min_score = daily_profit_lock.get_min_score(55)
-                    except Exception:
-                        pass
-                # Wave 45: London Open Booster — reduce min_score during London open spike
-                if _WAVES_LOADED and london_open_booster is not None:
-                    try:
-                        _min_score = london_open_booster.adjust_min_score(_min_score)
-                    except Exception:
-                        pass
-                if score < _min_score:
-                    logger.debug(f"[SCORE GATE] Quality {score}/100 < {_min_score} — suppressing {raw_signal}")
-                    return ScalpingSignal.HOLD
-                logger.debug(f"[SCORE GATE] Quality {score}/100 >= {_min_score} — {raw_signal} confirmed")
-            except Exception as _e:
-                logger.debug(f"[SCORE GATE] error: {_e}")
-
-        # ── Wave 13: ML price direction agreement gate ──────────────────────
-        if _WAVES_LOADED and ml_predictor is not None and raw_signal != ScalpingSignal.HOLD:
-            try:
-                closes_list_ml = [float(b.get("close", self.current_price)) for b in list(self.bars)[-25:] if isinstance(b, dict)]
-                if len(closes_list_ml) >= 5:
-                    ml_result = ml_predictor.predict_signal_agreement(closes_list_ml, raw_signal)
-                    if not ml_result.get("agree", True) and ml_result.get("confidence", 0) >= 60:
-                        logger.debug(
-                            f"[ML GATE] ML disagrees: dir={ml_result['direction']} "
-                            f"conf={ml_result['confidence']}% -- suppressing {raw_signal}"
-                        )
-                        return ScalpingSignal.HOLD
-                    logger.debug(
-                        f"[ML OK] dir={ml_result.get('direction','?')} "
-                        f"conf={ml_result.get('confidence',0)}% boost={ml_result.get('boost',1.0):.2f}"
-                    )
-            except Exception as _e:
-                logger.debug(f"[ML GATE] error: {_e}")
-
-        return raw_signal
-
-
-
-
-
+        self.last_signal_details = result
+        self._bb_squeeze = bool(result.get("bb", {}).get("squeeze", False))
+        self._ema_cross_signal = result.get("ema_cross", "NEUTRAL")
+        self._market_regime = self._detect_market_regime(prices)
+        return result.get("signal", ScalpingSignal.HOLD)
 
     def _order_execution_worker(self):
         """
