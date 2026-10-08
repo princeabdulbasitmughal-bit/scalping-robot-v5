@@ -321,11 +321,12 @@ class RiskGuard:
             if tick_time_val <= 0.0:
                 return Decision(False, "FAIL_CLOSED: Non-positive tick timestamp", 0.0)
 
+            now = float(self.clock())
+
             # Normalize millisecond epoch timestamp if detected
-            if tick_time_val > 1e11:
+            if tick_time_val > 1e11 or (now > 0 and tick_time_val > now * 100):
                 tick_time_val = tick_time_val / 1000.0
 
-            now = float(self.clock())
             tick_age = now - tick_time_val
             if tick_age > max_tick_age_sec:
                 return Decision(
