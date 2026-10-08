@@ -57,9 +57,15 @@ except ImportError as e:
 try:
     from .scalping_engine import ScalpingRobotV5, ScalpingSignal
     from .storage import atomic_write_json, safe_read_json
+    from .risk_guard import RiskGuard, Decision
 except ImportError as e:
     from scalping_engine import ScalpingRobotV5, ScalpingSignal
     from storage import atomic_write_json, safe_read_json
+    try:
+        from risk_guard import RiskGuard, Decision
+    except ImportError:
+        RiskGuard = None
+        Decision = None
 
 # ---------------------------------------------------------------------------
 # Wave 8-14 optional module imports (safe fallback if files missing)
@@ -428,6 +434,7 @@ class MT5LiveTrader:
         self._price_5min: collections.deque = collections.deque(maxlen=300)
         self._price_15min: collections.deque = collections.deque(maxlen=900)
         self._market_regime: str = "RANGING"
+        self.risk_guard = RiskGuard(self.config) if RiskGuard is not None else None
 
         # Dynamic Slippage State
         self.current_dynamic_slippage: int = self.config.get("base_slippage", 10)
@@ -2039,6 +2046,35 @@ class MT5LiveTrader:
 
                     pos_id = f"trade-{int(time.time() * 1000)}"
                     t_dispatch_start = time.perf_counter_ns()
+
+                    # ── Fail-closed RiskGuard Pre-Flight Check (Paper & Live) ──
+                    if self.risk_guard is not None:
+                        _rg_order = {
+                            "order_type": "BUY" if signal == ScalpingSignal.BUY else "SELL",
+                            "price": price,
+                            "sl": sl,
+                            "tp": tp,
+                            "lots": lot_size,
+                        }
+                        _rg_account = {
+                            "balance": self.balance,
+                            "equity": self.equity,
+                            "daily_pnl": self.daily_pnl,
+                            "open_positions": self.open_positions,
+                        }
+                        _tick_time = getattr(self.last_tick, "time", None) if self.last_tick else None
+                        if _tick_time is None:
+                            _tick_time = time.time()
+                        _rg_market = {
+                            "spread_pips": self.spread_pips,
+                            "tick_time": _tick_time,
+                            "pip_size": pip_size,
+                        }
+                        _rg_decision = self.risk_guard.check_order(_rg_order, _rg_account, _rg_market)
+                        if not _rg_decision.allowed:
+                            logger.warning(f"[RISK_GUARD BLOCKED] Order blocked: {_rg_decision.reason}")
+                            return
+                        lot_size = _rg_decision.lot
 
                     with self._lock:
                         self._order_in_flight = True

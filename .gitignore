@@ -18,3 +18,8 @@ trades_history.json
 mt5_session/
 .coverage
 *.tmp.*
+risk_state.json
+KILL_SWITCH
+E_STOP.flag
+backups/
+tunnel_url.txt
