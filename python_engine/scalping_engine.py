@@ -574,11 +574,19 @@ class ScalpingRobotV5:
           Lots = Risk Dollars / (Effective SL * Pip Value)
         Clamped within broker min/max lot constraints.
         """
-        bal = max(100.0, float(account_balance))
+        # Guard: refuse to trade with zero or negative balance
+        account_balance_f = float(account_balance)
+        if account_balance_f <= 0:
+            logger.warning("[SIZING] Account balance <= 0 (%.2f) — returning 0.0 lots", account_balance_f)
+            return 0.0
+        bal = account_balance_f
         risk_pct = float(risk_percent if risk_percent is not None else self.config.get("risk_percent", 1.0))
         risk_dollars = bal * (risk_pct / 100.0)
 
         pip_value = float(self.config.get("pip_value", 1.0))
+        if pip_value <= 0:
+            logger.error("[SIZING] pip_value <= 0 in config — REJECT (fail-closed)")
+            return 0.0
         min_lots = float(self.config.get("min_lot_size", 0.01))
         max_lots = float(self.config.get("max_lot_size", 5.0))
         lot_step = float(self.config.get("lot_step", 0.01))
@@ -593,9 +601,14 @@ class ScalpingRobotV5:
         risk_per_lot = max(1e-4, effective_sl_pips * pip_value)
         raw_lots = risk_dollars / risk_per_lot
 
-        # Quantize to lot step and clamp
-        steps = math.floor(raw_lots / lot_step)
+        # Quantize to lot step (epsilon avoids floating-point floor truncation e.g. 0.29/0.01 -> 28)
+        steps = math.floor(raw_lots / lot_step + 1e-9)
         quantized_lots = steps * lot_step
-        final_lots = max(min_lots, min(max_lots, quantized_lots))
 
+        # If risk budget only supports sub-minimum sizing, don't force a trade
+        if quantized_lots < min_lots:
+            logger.debug("[SIZING] quantized_lots=%.4f < min_lots=%.4f — returning 0.0", quantized_lots, min_lots)
+            return 0.0
+
+        final_lots = min(max_lots, quantized_lots)
         return round(final_lots, 2)

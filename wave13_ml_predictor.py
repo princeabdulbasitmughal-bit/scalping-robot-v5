@@ -20,7 +20,17 @@ logger = logging.getLogger("wave13_ml")
 class LinearRegressor:
     """Ordinary least squares 1-D linear regression. Pure Python, zero deps."""
 
-    def fit(self, y: list) -> dict:
+    def __init__(self):
+        self._predictor = None
+
+    def _get_predictor(self):
+        if self._predictor is None:
+            self._predictor = MLPredictor(_regressor=self)
+        return self._predictor
+
+    def fit(self, y: list = None) -> dict:
+        if not y:
+            return {"slope": 0.0, "intercept": 0.0, "r_squared": 0.0}
         n = len(y)
         if n < 3:
             return {"slope": 0.0, "intercept": 0.0, "r_squared": 0.0}
@@ -37,9 +47,27 @@ class LinearRegressor:
         r_squared = (ss_xy ** 2 / (ss_xx * ss_yy)) if ss_yy > 0 else 0.0
         return {"slope": slope, "intercept": intercept, "r_squared": max(0.0, min(1.0, r_squared))}
 
-    def predict(self, y: list) -> dict:
+    def predict(self, y: list = None) -> dict:
         """Alias for MLPredictor().predict(y)."""
-        return MLPredictor().predict(y)
+        return self._get_predictor().predict(y)
+
+    def predict_signal_agreement(self, closes: list = None, signal: str = "BUY") -> dict:
+        """Check if ML prediction agrees with a trading signal (BUY/SELL)."""
+        return self._get_predictor().predict_signal_agreement(closes, signal)
+
+    def record_outcome(self, predicted_direction: str, actual_direction: str):
+        """Call after a trade closes to track ML accuracy."""
+        return self._get_predictor().record_outcome(predicted_direction, actual_direction)
+
+    @property
+    def accuracy(self) -> float:
+        """Prediction accuracy percentage (0.0 to 100.0)."""
+        return self._get_predictor().accuracy
+
+    @property
+    def last_prediction(self) -> dict:
+        """Most recent prediction dictionary."""
+        return self._get_predictor().last_prediction
 
 
 class MLPredictor:
@@ -51,17 +79,17 @@ class MLPredictor:
     4. RSI-style overbought/oversold correction
     """
 
-    def __init__(self, window: int = 20, min_r2: float = 0.25):
+    def __init__(self, window: int = 20, min_r2: float = 0.25, _regressor=None):
         self.window = window
         self.min_r2 = min_r2
-        self._regressor = LinearRegressor()
+        self._regressor = _regressor if _regressor is not None else LinearRegressor()
         self._last_prediction: dict = {}
         self._prediction_history: list = []  # (timestamp, direction, confidence)
         self._hit_count = 0
         self._total_checked = 0
 
     # ------------------------------------------------------------------
-    def predict(self, closes: list) -> dict:
+    def predict(self, closes: list = None) -> dict:
         """
         Predict next-bar direction from a list of close prices.
 
@@ -75,7 +103,7 @@ class MLPredictor:
               "atr_norm_slope": float
             }
         """
-        if len(closes) < 5:
+        if not closes or len(closes) < 5:
             return {"direction": "NEUTRAL", "confidence": 0, "slope": 0.0, "r_squared": 0.0,
                     "momentum": 0.0, "atr_norm_slope": 0.0}
 
@@ -152,7 +180,7 @@ class MLPredictor:
         return result
 
     # ------------------------------------------------------------------
-    def predict_signal_agreement(self, closes: list, signal: str) -> dict:
+    def predict_signal_agreement(self, closes: list = None, signal: str = "BUY") -> dict:
         """
         Check if ML prediction agrees with a trading signal (BUY/SELL).
 
@@ -164,6 +192,8 @@ class MLPredictor:
               "boost": float   # lot multiplier suggestion: 1.0 = no boost, 1.2 = 20% more
             }
         """
+        if closes is None:
+            closes = []
         pred = self.predict(closes)
         direction = pred["direction"]
         confidence = pred["confidence"]

@@ -64,12 +64,14 @@ class MomentumConfirmation:
             return True, ""  # HOLD or unknown — not our concern
 
         prices = list(self._price_buffer)
-        if len(prices) < 2:
+        # FIX: if not enough ticks to ever meet min_ticks_in_dir, allow trade (insufficient data)
+        if len(prices) <= self._min_ticks_in_dir:
             return True, "MOMENTUM: insufficient tick data — allowing"
 
-        # Count ticks moving in the signal direction
-        up_ticks   = sum(1 for i in range(1, len(prices)) if prices[i] >= prices[i - 1])
-        down_ticks = sum(1 for i in range(1, len(prices)) if prices[i] <= prices[i - 1])
+        # Count ticks moving in the signal direction — use strict comparison so flat ticks
+        # don't count as BOTH up and down momentum (was >= and <= before)
+        up_ticks   = sum(1 for i in range(1, len(prices)) if prices[i] > prices[i - 1])
+        down_ticks = sum(1 for i in range(1, len(prices)) if prices[i] < prices[i - 1])
         total_ticks = len(prices) - 1
 
         if signal == "BUY":

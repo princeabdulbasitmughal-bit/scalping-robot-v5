@@ -47,8 +47,10 @@ class ReversalDetector:
         for i in range(1, len(prices)):
             delta = prices[i] - prices[i - 1]
             (gains if delta > 0 else losses).append(abs(delta))
-        avg_gain = sum(gains) / max(len(gains), 1)
-        avg_loss = sum(losses) / max(len(losses), 1)
+        # Use period as denominator (Wilder: average over full period, not just non-zero bars)
+        period = self._rsi_period
+        avg_gain = sum(gains) / period
+        avg_loss = sum(losses) / period
         if avg_loss == 0:
             return 100.0
         rs = avg_gain / avg_loss
@@ -108,11 +110,18 @@ class ReversalDetector:
             return ("BUY", round(confidence, 3), "bullish_divergence_oversold")
 
         # Extreme levels without divergence (lower confidence)
+        # FIX: update _last_signal_time here too, to prevent signal spam every tick
         if latest_rsi > self._overbought:
             confidence = min((latest_rsi - self._overbought) / 50.0, 0.5)
+            self._last_signal = "SELL"
+            self._last_signal_time = now
+            self._total_reversals += 1
             return ("SELL", round(confidence, 3), "overbought_extreme")
         if latest_rsi < self._oversold:
             confidence = min((self._oversold - latest_rsi) / 50.0, 0.5)
+            self._last_signal = "BUY"
+            self._last_signal_time = now
+            self._total_reversals += 1
             return ("BUY", round(confidence, 3), "oversold_extreme")
 
         return ("HOLD", 0.0, "no_reversal_condition")

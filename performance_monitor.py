@@ -118,10 +118,13 @@ def evaluate_and_report() -> bool:
         f"Win Rate: {win_rate:.2f}% | Grade: {grade} | Total Trades: {total_trades}"
     )
 
-    open_positions = data.get("open_positions", [])
-    open_positions_count = data.get("open_positions_count", len(open_positions))
+    _raw_positions = data.get("open_positions_list") or data.get("open_positions", [])
+    open_positions = _raw_positions if isinstance(_raw_positions, list) else []
+    _count = data.get("open_positions_count")
+    open_positions_count = _count if isinstance(_count, int) else len(open_positions)
     latency_metrics = data.get("latency_metrics", {})
-    updated_at = data.get("updated_at", datetime.utcnow().isoformat() + "Z")
+    from datetime import timezone as _tz
+    updated_at = data.get("updated_at", datetime.now(_tz.utc).isoformat())
     current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Generate Performance Report Content

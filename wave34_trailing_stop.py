@@ -45,17 +45,22 @@ class TrailingStopManager:
         entry_price: float,
         current_price: float,
         current_sl: float,
+        pip_size: float = 0.1,   # FIX: XAUUSD = 0.1; EURUSD = 0.0001
     ) -> float | None:
         """
         Returns the new SL price if it should be moved, else None.
         Caller should only send the new SL to the broker if it's better
         (i.e., tighter than the old SL).
+        pip_size: the value of 1 pip in price units (0.1 for XAUUSD, 0.0001 for EURUSD).
         """
         try:
             with self._lock:
+                trail_price = self.trail_pips * pip_size
+                trigger_price = self.profit_trigger_pips * pip_size
+
                 if direction == "BUY":
                     pips_profit = current_price - entry_price
-                    if pips_profit < self.profit_trigger_pips:
+                    if pips_profit < trigger_price:
                         return None  # Not profitable enough yet
 
                     # Start / continue trailing
@@ -65,7 +70,7 @@ class TrailingStopManager:
                         self._total_trails += 1
                         logger.info(
                             f"[WAVE34] Trailing activated: ticket={ticket} dir=BUY "
-                            f"profit={pips_profit:.2f}pips"
+                            f"profit={pips_profit/pip_size:.1f}pips"
                         )
 
                     best = self._best_prices.get(ticket, current_price)
@@ -73,17 +78,17 @@ class TrailingStopManager:
                         self._best_prices[ticket] = current_price
                         best = current_price
 
-                    new_sl = best - self.trail_pips
+                    new_sl = best - trail_price
                     if new_sl > current_sl:
                         self._total_sl_moves += 1
                         logger.debug(
-                            f"[WAVE34] SL moved: ticket={ticket} {current_sl:.2f}->{new_sl:.2f}"
+                            f"[WAVE34] SL moved: ticket={ticket} {current_sl:.5f}->{new_sl:.5f}"
                         )
                         return new_sl
 
                 elif direction == "SELL":
                     pips_profit = entry_price - current_price
-                    if pips_profit < self.profit_trigger_pips:
+                    if pips_profit < trigger_price:
                         return None
 
                     if ticket not in self._trailing_active:
@@ -92,7 +97,7 @@ class TrailingStopManager:
                         self._total_trails += 1
                         logger.info(
                             f"[WAVE34] Trailing activated: ticket={ticket} dir=SELL "
-                            f"profit={pips_profit:.2f}pips"
+                            f"profit={pips_profit/pip_size:.1f}pips"
                         )
 
                     best = self._best_prices.get(ticket, current_price)
@@ -100,11 +105,12 @@ class TrailingStopManager:
                         self._best_prices[ticket] = current_price
                         best = current_price
 
-                    new_sl = best + self.trail_pips
-                    if new_sl < current_sl:
+                    new_sl = best + trail_price
+                    # FIX: for SELL, new SL is better (tighter) when it's lower than current
+                    if current_sl == 0.0 or new_sl < current_sl:
                         self._total_sl_moves += 1
                         logger.debug(
-                            f"[WAVE34] SL moved: ticket={ticket} {current_sl:.2f}->{new_sl:.2f}"
+                            f"[WAVE34] SL moved: ticket={ticket} {current_sl:.5f}->{new_sl:.5f}"
                         )
                         return new_sl
 

@@ -26,11 +26,20 @@ class BalanceFloorGuard:
 
     def __init__(
         self,
-        floor_usd: float = BALANCE_FLOOR_USD,
+        floor_usd: float = None,
         hysteresis_usd: float = HYSTERESIS_USD,
+        min_balance: float = None,
+        **kwargs,
     ):
-        self._floor = floor_usd
-        self._hysteresis = hysteresis_usd
+        if min_balance is not None:
+            self._floor = float(min_balance)
+        elif floor_usd is not None:
+            self._floor = float(floor_usd)
+        elif "min_balance_usd" in kwargs and kwargs["min_balance_usd"] is not None:
+            self._floor = float(kwargs["min_balance_usd"])
+        else:
+            self._floor = BALANCE_FLOOR_USD
+        self._hysteresis = float(hysteresis_usd)
         self._current_balance: float = 0.0
         self._is_halted: bool = False
         self._halt_triggered_at: float = 0.0
@@ -39,6 +48,14 @@ class BalanceFloorGuard:
         self._halt_count: int = 0
         self._update_count: int = 0
         self._created_at = time.time()
+
+    @property
+    def floor_usd(self) -> float:
+        return self._floor
+
+    @property
+    def min_balance(self) -> float:
+        return self._floor
 
     def _today_utc(self) -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -118,6 +135,7 @@ class BalanceFloorGuard:
                 halted_for = round(time.time() - self._halt_triggered_at, 1)
             return {
                 "floor_usd": self._floor,
+                "min_balance": self._floor,
                 "hysteresis_usd": self._hysteresis,
                 "current_balance": round(self._current_balance, 2),
                 "is_halted": self._is_halted,

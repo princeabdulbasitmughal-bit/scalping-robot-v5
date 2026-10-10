@@ -98,15 +98,17 @@ class CorrelationGuard:
         cutoff = now - self._window_sec
         recent_times = [t for t in self._signal_times if t >= cutoff]
         if len(recent_times) > self._max_signals:
-            self._blocked_until = now + self._cooldown_sec
-            self._total_triggers += 1
-            logger.warning(
-                "[WAVE27] %d signals in %.0fs window → CHOPPY MARKET, "
-                "blocking for %.0fs",
-                len(recent_times),
-                self._window_sec,
-                self._cooldown_sec,
-            )
+            # FIX: only extend cooldown if not already in one — prevents infinite starvation
+            if now >= self._blocked_until:
+                self._blocked_until = now + self._cooldown_sec
+                self._total_triggers += 1
+                logger.warning(
+                    "[WAVE27] %d signals in %.0fs window → CHOPPY MARKET, "
+                    "blocking for %.0fs",
+                    len(recent_times),
+                    self._window_sec,
+                    self._cooldown_sec,
+                )
 
 
 # Module-level singleton

@@ -20,14 +20,11 @@ try:
     from fastapi.exceptions import RequestValidationError
     from starlette.exceptions import HTTPException as StarletteHTTPException
     import uvicorn
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "fastapi", "uvicorn[standard]", "-q"])
-    from fastapi import FastAPI, Request
-    from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import JSONResponse, HTMLResponse
-    from fastapi.exceptions import RequestValidationError
-    from starlette.exceptions import HTTPException as StarletteHTTPException
-    import uvicorn
+except ImportError as _e:
+    raise SystemExit(
+        f"OmniCommand: required package missing ({_e}). "
+        "Run: pip install fastapi 'uvicorn[standard]'"
+    )
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -40,9 +37,7 @@ logging.basicConfig(
 log = logging.getLogger("omnicommand")
 
 START_TIME = time.time()
-BASE_DIR = Path(r"E:\scalping-robot-v5")
-if not BASE_DIR.exists():
-    BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent
 
 STATUS_FILE = BASE_DIR / "live_status.json"
 
@@ -77,13 +72,15 @@ DEFAULT_LIVE_STATUS: dict = {
 app = FastAPI(title="OmniCommand Pro", version="5.1.0")
 
 # ---------------------------------------------------------------------------
-# CORS — allow web dashboard and external clients on any origin
+# CORS — restrict to configurable allowed origins (default: localhost only)
+# Set ALLOWED_ORIGINS env var to a comma-separated list to allow more origins.
 # ---------------------------------------------------------------------------
+_allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://127.0.0.1,http://localhost").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=False,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
@@ -485,7 +482,7 @@ async def analytics():
 
 
 
-@app.api_route("/trader/restart", methods=["GET", "POST"])
+@app.api_route("/trader/restart", methods=["POST"])
 async def restart_trader():
     """Manually trigger trader restart via watchdog signal file and reset."""
     try:
@@ -542,7 +539,7 @@ async def restart_trader():
         return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
 
 
-@app.api_route("/trader/stop", methods=["POST", "GET"])
+@app.api_route("/trader/stop", methods=["POST"])
 async def stop_trader():
     """Gracefully stop the trader process by writing a stop signal file and terminating trader PID."""
     try:
@@ -753,13 +750,14 @@ async def serve_dashboard_v2():
             with open(p, encoding="utf-8") as f:
                 return HTMLResponse(f.read())
         return HTMLResponse("<h1>dashboard_v2.html not found</h1>", status_code=404)
-    except Exception as exc:
-        return HTMLResponse(f"<pre>{exc}</pre>", status_code=500)
+    except Exception as exc:  # noqa: F841
+        return HTMLResponse("<h1>Internal Server Error</h1>", status_code=500)
 
 
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    log.info("Starting OmniCommand Pro on http://0.0.0.0:8899")
-    uvicorn.run(app, host="0.0.0.0", port=8899, log_level="warning")
+    _host = os.getenv("OMNICOMMAND_HOST", "127.0.0.1")
+    log.info("Starting OmniCommand Pro on http://%s:8899", _host)
+    uvicorn.run(app, host=_host, port=8899, log_level="warning")

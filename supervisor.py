@@ -4,12 +4,14 @@ Launched via bootstrap_launch.py with DETACHED_PROCESS flag.
 Survives PowerShell session end. Checks every 10s.
 """
 import subprocess
+import sys
 import time
 import os
 import datetime
 
-PYTHON   = r"C:\Users\absh5\AppData\Local\Programs\Python\Python311\python.exe"
-BASE     = r"E:\scalping-robot-v5"
+# Use the same Python interpreter that is running this script — no hardcoded paths
+PYTHON   = sys.executable
+BASE     = str(Path(__file__).resolve().parent) if False else os.path.dirname(os.path.abspath(__file__))
 WATCHDOG = os.path.join(BASE, "watchdog_runner.py")
 LOG      = os.path.join(BASE, "supervisor.log")
 
@@ -18,6 +20,8 @@ CREATE_NEW_PROCESS_GROUP = 0x00000200
 CREATE_NO_WINDOW      = 0x08000000
 
 FLAGS = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+
+_MAX_BACKOFF_SEC = 120   # Exponential backoff cap for crash loops
 
 
 def log(msg):
@@ -52,6 +56,8 @@ def get_watchdog_pid():
 
 def start_watchdog():
     """Launch watchdog_runner.py as a fully detached process."""
+    out_log = None
+    err_log = None
     try:
         out_log = open(os.path.join(BASE, "watchdog_out.log"), "a")
         err_log = open(os.path.join(BASE, "watchdog_err.log"), "a")
@@ -69,24 +75,40 @@ def start_watchdog():
     except Exception as e:
         log("Start watchdog error: {}".format(e))
         return None
+    finally:
+        # Close file handles after Popen — the child has its own file descriptor
+        if out_log is not None:
+            try:
+                out_log.close()
+            except Exception:
+                pass
+        if err_log is not None:
+            try:
+                err_log.close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
     log("=== Supervisor started (PID={}) ===".format(os.getpid()))
     restart_count = 0
+    consecutive_failures = 0
 
     while True:
         try:
             pid = get_watchdog_pid()
             if pid is None:
                 restart_count += 1
-                log("Watchdog DOWN. Restart #{}".format(restart_count))
+                consecutive_failures += 1
+                log("Watchdog DOWN. Restart #{} (consecutive={})".format(restart_count, consecutive_failures))
                 start_watchdog()
-                time.sleep(8)  # Give watchdog time to init
+                # Exponential backoff: 8s, 16s, 32s … capped at _MAX_BACKOFF_SEC
+                backoff = min(8 * (2 ** (consecutive_failures - 1)), _MAX_BACKOFF_SEC)
+                log("Backoff {}s before next check".format(backoff))
+                time.sleep(backoff)
             else:
-                # Watchdog alive — log every 60s (every 6 cycles)
-                if restart_count == 0 or True:
-                    pass  # Silent when healthy (logs fill up fast)
+                # Watchdog alive — reset consecutive failure counter
+                consecutive_failures = 0
         except Exception as exc:
             log("Supervisor error: {}".format(exc))
 

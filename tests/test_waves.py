@@ -874,6 +874,18 @@ class TestWave13LinearRegressor:
         self.ml.fit(closes)
         assert True
 
+    def test_predict_signal_agreement(self):
+        closes = [2400.0 + i * 0.1 for i in range(30)]
+        result = self.ml.predict_signal_agreement(closes, "BUY")
+        assert isinstance(result, dict)
+        assert "agree" in result
+        assert "confidence" in result
+
+    def test_accuracy_property(self):
+        acc = self.ml.accuracy
+        assert isinstance(acc, (int, float))
+        assert 0.0 <= acc <= 100.0
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WAVE 14 — Auto Tuner

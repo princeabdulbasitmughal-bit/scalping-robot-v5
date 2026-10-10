@@ -1461,6 +1461,12 @@ class MT5LiveTrader:
                     volatility_breaker.update(current_price)
                 except Exception:
                     pass
+            # Wave 39: Update drawdown pause equity tracker (must run every tick)
+            if _WAVES_LOADED and drawdown_pause is not None:
+                try:
+                    drawdown_pause.update(self.equity)
+                except Exception:
+                    pass
             # Wave 42: Record tick arrival for tick-volume / dead-market filter
             if _WAVES_LOADED and tick_volume_filter is not None:
                 try:
@@ -1992,6 +1998,49 @@ class MT5LiveTrader:
                         logger.debug(f"[SPREAD GUARD] Order blocked: {reason}")
                         self._save_state()
                         return
+
+                    # ── Wave 35-39: Ghost filter gate ────────────────────────────────────
+                    if _WAVES_LOADED:
+                        if overnight_guard is not None:
+                            try:
+                                if overnight_guard.is_entry_blocked():
+                                    logger.debug("[WAVE35] overnight_guard: entry blocked")
+                                    self._save_state()
+                                    return
+                            except Exception:
+                                pass
+                        if spread_momentum_guard is not None:
+                            try:
+                                if spread_momentum_guard.is_entry_blocked():
+                                    logger.debug("[WAVE36] spread_momentum_guard: entry blocked")
+                                    self._save_state()
+                                    return
+                            except Exception:
+                                pass
+                        if entry_cooldown is not None:
+                            try:
+                                if entry_cooldown.is_entry_blocked():
+                                    logger.debug("[WAVE37] entry_cooldown: entry blocked")
+                                    self._save_state()
+                                    return
+                            except Exception:
+                                pass
+                        if volatility_breaker is not None:
+                            try:
+                                if volatility_breaker.is_entry_blocked():
+                                    logger.debug("[WAVE38] volatility_breaker: entry blocked")
+                                    self._save_state()
+                                    return
+                            except Exception:
+                                pass
+                        if drawdown_pause is not None:
+                            try:
+                                if drawdown_pause.is_entry_blocked():
+                                    logger.debug("[WAVE39] drawdown_pause: entry blocked")
+                                    self._save_state()
+                                    return
+                            except Exception:
+                                pass
 
                     # Compute dynamic slippage deviation
                     dynamic_deviation = self.calculate_dynamic_slippage(indicators)

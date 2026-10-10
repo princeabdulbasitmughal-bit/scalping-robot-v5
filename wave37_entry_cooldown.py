@@ -32,7 +32,8 @@ class EntryCooldown:
         """
         self.last_trade_result = "WIN" if was_win else "LOSS"
         cooldown = self.COOLDOWN_WIN_SEC if was_win else self.COOLDOWN_LOSS_SEC
-        self._cooldown_until = time.time() + cooldown
+        # FIX: use max() so a shorter new cooldown never truncates a longer active one
+        self._cooldown_until = max(self._cooldown_until, time.time() + cooldown)
         self._last_cooldown_reason = (
             f"{'WIN' if was_win else 'LOSS'} trade (PnL={pnl:+.2f}): {cooldown}s cooldown"
         )

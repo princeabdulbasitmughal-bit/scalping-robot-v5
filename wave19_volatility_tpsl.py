@@ -38,9 +38,9 @@ class VolatilityTPSLAdjuster:
         self.min_sl_pips = min_sl_pips
         self.max_sl_pips = max_sl_pips
 
-    def _calc_atr(self, closes: list) -> float:
+    def _calc_atr(self, closes: list = None) -> float:
         """ATR proxy: mean of abs(close[i] - close[i-1]) over last atr_period bars."""
-        if len(closes) < 2:
+        if not closes or len(closes) < 2:
             return 0.5
         diffs = [abs(closes[i] - closes[i - 1]) for i in range(1, len(closes))]
         recent = diffs[-self.atr_period:] if len(diffs) >= self.atr_period else diffs
@@ -50,7 +50,7 @@ class VolatilityTPSLAdjuster:
 
     def adjusted_tpsl(
         self,
-        closes: list,
+        closes: list = None,
         base_tp_pips: float = 45.0,
         base_sl_pips: float = 30.0,
         session_info: dict = None,
@@ -62,6 +62,8 @@ class VolatilityTPSLAdjuster:
         Low-vol:   TP tightens to 0.75x, SL tightens to 0.85x (lock in small wins)
         Normal:    No change
         """
+        if closes is None:
+            closes = []
         try:
             atr = self._calc_atr(closes)
 

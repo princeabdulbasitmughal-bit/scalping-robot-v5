@@ -24,10 +24,11 @@ from typing import Tuple
 logger = logging.getLogger(__name__)
 
 # (hour_utc, minute_utc) of each major release
+# NFP/Jobless Claims: 08:30 ET = 12:30 UTC (EDT) / 13:30 UTC (EST)
+# FOMC/Fed Decision:  14:00 ET = 18:00 UTC (EDT) / 19:00 UTC (EST)
 _DEFAULT_RELEASE_TIMES_UTC: list[tuple[int, int]] = [
-    (8,  30),   # US Jobless / NFP
-    (12, 30),   # CPI / PPI / Retail Sales
-    (14,  0),   # FOMC / Fed Decision
+    (12, 30),   # US Jobless / NFP / CPI / PPI / Retail Sales (08:30 ET = 12:30 UTC EDT)
+    (18,  0),   # FOMC / Fed Decision (14:00 ET = 18:00 UTC EDT)
     (17,  0),   # OPEC / Energy
     (20, 30),   # Asian open-volatility
     (21, 45),   # Rollover window
@@ -77,7 +78,9 @@ class TimeFilter:
 
         for (rh, rm) in self._release_times:
             release_minutes = rh * 60 + rm
-            diff = now_minutes - release_minutes  # negative = before, positive = after
+            # Circular diff: handles midnight rollover correctly
+            raw_diff = now_minutes - release_minutes
+            diff = (raw_diff + 720) % 1440 - 720  # range [-720, +720]
 
             if -self._block_before <= diff <= self._block_after:
                 direction = "before" if diff < 0 else "after"

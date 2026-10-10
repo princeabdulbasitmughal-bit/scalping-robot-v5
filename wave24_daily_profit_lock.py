@@ -20,13 +20,24 @@ class DailyProfitLock:
 
     def __init__(
         self,
-        profit_target_usd: float = _DEFAULT_TARGET_USD,
+        profit_target_usd: float = None,
         protect_lot: float = _PROTECT_LOT,
         protect_min_score: int = _PROTECT_MIN_SCORE,
+        daily_target_usd: float = None,
+        **kwargs,
     ):
-        self._profit_target = profit_target_usd
-        self._protect_lot   = protect_lot
-        self._protect_score = protect_min_score
+        if daily_target_usd is not None:
+            resolved_target = daily_target_usd
+        elif profit_target_usd is not None:
+            resolved_target = profit_target_usd
+        elif "target_usd" in kwargs and kwargs["target_usd"] is not None:
+            resolved_target = kwargs["target_usd"]
+        else:
+            resolved_target = _DEFAULT_TARGET_USD
+
+        self._profit_target = float(resolved_target)
+        self._protect_lot   = float(protect_lot)
+        self._protect_score = int(protect_min_score)
 
         self._protect_mode: bool = False
         self._peak_daily_pnl: float = 0.0
@@ -63,6 +74,14 @@ class DailyProfitLock:
     def is_active(self) -> bool:
         return self._protect_mode
 
+    @property
+    def profit_target_usd(self) -> float:
+        return self._profit_target
+
+    @property
+    def daily_target_usd(self) -> float:
+        return self._profit_target
+
     def apply_lot(self, current_lot: float) -> float:
         """Return adjusted lot — reduced to protect_lot when locked."""
         if self._protect_mode:
@@ -85,6 +104,7 @@ class DailyProfitLock:
         return {
             "protect_mode": self._protect_mode,
             "profit_target_usd": self._profit_target,
+            "daily_target_usd": self._profit_target,
             "peak_daily_pnl": round(self._peak_daily_pnl, 2),
             "engagements": self._engagements,
             "protect_lot": self._protect_lot,

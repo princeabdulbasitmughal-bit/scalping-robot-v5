@@ -551,52 +551,62 @@ class Backtester:
                 breakeven_act = bool(t.get("breakeven_activated", False))
 
                 if t_type == ScalpingSignal.BUY:
-                    if not breakeven_act and (high_price - t_entry) >= self.breakeven_dist:
-                        t["sl"] = t_entry + self.breakeven_lock
-                        t["breakeven_activated"] = True
-                        breakeven_act = True
-                        t_sl = t["sl"]
+                    # Trailing / breakeven — only update if SL not already hit
+                    hit_sl_buy = (low_price <= t_sl and t_sl > 0)
+                    if not hit_sl_buy:
+                        if not breakeven_act and (high_price - t_entry) >= self.breakeven_dist:
+                            t["sl"] = t_entry + self.breakeven_lock
+                            t["breakeven_activated"] = True
+                            breakeven_act = True
+                            t_sl = t["sl"]
+                        if breakeven_act:
+                            new_sl = high_price - self.trailing_dist
+                            if new_sl > t_sl:
+                                t["sl"] = new_sl
+                                t_sl = new_sl
 
-                    if breakeven_act:
-                        new_sl = high_price - self.trailing_dist
-                        if new_sl > t_sl:
-                            t["sl"] = new_sl
-                            t_sl = new_sl
-
-                    if high_price >= t_tp and t_tp > 0:
-                        closed = True
-                        pnl = (t_tp - t_entry) / self.pip_size * (self.lot_size * 10.0)
-                        close_reason = "TAKE_PROFIT"
-                        close_price = t_tp
-                    elif low_price <= t_sl and t_sl > 0:
+                    # Pessimistic fill: SL wins when both hit same candle
+                    hit_sl_buy = (low_price <= t_sl and t_sl > 0)
+                    hit_tp_buy = (high_price >= t_tp and t_tp > 0)
+                    if hit_sl_buy:
                         closed = True
                         pnl = (t_sl - t_entry) / self.pip_size * (self.lot_size * 10.0)
                         close_reason = "STOP_LOSS"
                         close_price = t_sl
-
-                elif t_type == ScalpingSignal.SELL:
-                    if not breakeven_act and (t_entry - low_price) >= self.breakeven_dist:
-                        t["sl"] = t_entry - self.breakeven_lock
-                        t["breakeven_activated"] = True
-                        breakeven_act = True
-                        t_sl = t["sl"]
-
-                    if breakeven_act:
-                        new_sl = low_price + self.trailing_dist
-                        if new_sl < t_sl or t_sl == 0:
-                            t["sl"] = new_sl
-                            t_sl = new_sl
-
-                    if low_price <= t_tp and t_tp > 0:
+                    elif hit_tp_buy:
                         closed = True
-                        pnl = (t_entry - t_tp) / self.pip_size * (self.lot_size * 10.0)
+                        pnl = (t_tp - t_entry) / self.pip_size * (self.lot_size * 10.0)
                         close_reason = "TAKE_PROFIT"
                         close_price = t_tp
-                    elif high_price >= t_sl and t_sl > 0:
+
+                elif t_type == ScalpingSignal.SELL:
+                    # Trailing / breakeven — only update if SL not already hit
+                    hit_sl_sell = (high_price >= t_sl and t_sl > 0)
+                    if not hit_sl_sell:
+                        if not breakeven_act and (t_entry - low_price) >= self.breakeven_dist:
+                            t["sl"] = t_entry - self.breakeven_lock
+                            t["breakeven_activated"] = True
+                            breakeven_act = True
+                            t_sl = t["sl"]
+                        if breakeven_act:
+                            new_sl = low_price + self.trailing_dist
+                            if new_sl < t_sl or t_sl == 0:
+                                t["sl"] = new_sl
+                                t_sl = new_sl
+
+                    # Pessimistic fill: SL wins when both hit same candle
+                    hit_sl_sell = (high_price >= t_sl and t_sl > 0)
+                    hit_tp_sell = (low_price <= t_tp and t_tp > 0)
+                    if hit_sl_sell:
                         closed = True
                         pnl = (t_entry - t_sl) / self.pip_size * (self.lot_size * 10.0)
                         close_reason = "STOP_LOSS"
                         close_price = t_sl
+                    elif hit_tp_sell:
+                        closed = True
+                        pnl = (t_entry - t_tp) / self.pip_size * (self.lot_size * 10.0)
+                        close_reason = "TAKE_PROFIT"
+                        close_price = t_tp
 
                 if closed:
                     balance += pnl
@@ -614,27 +624,33 @@ class Backtester:
 
             open_trades = remaining_trades
 
-            # 2. Evaluate new entry
+            # 2. Evaluate new entry (entry at NEXT bar open — no lookahead)
             if len(open_trades) < int(self.robot.config.get("max_orders", 1)):
                 sig = self.robot.evaluate_entry(indicators)
-                if sig == ScalpingSignal.BUY:
-                    open_trades.append({
-                        "type": ScalpingSignal.BUY,
-                        "entry_price": curr_price,
-                        "tp": curr_price + self.tp_dist,
-                        "sl": curr_price - self.sl_dist,
-                        "breakeven_activated": False,
-                        "open_bar": i
-                    })
-                elif sig == ScalpingSignal.SELL:
-                    open_trades.append({
-                        "type": ScalpingSignal.SELL,
-                        "entry_price": curr_price,
-                        "tp": curr_price - self.tp_dist,
-                        "sl": curr_price + self.sl_dist,
-                        "breakeven_activated": False,
-                        "open_bar": i
-                    })
+                if sig in [ScalpingSignal.BUY, ScalpingSignal.SELL]:
+                    # Use next bar's open as entry price to eliminate 1-bar lookahead bias
+                    if i + 1 < len(bars):
+                        entry_price = float(bars[i + 1].get("open", curr_price))
+                    else:
+                        entry_price = curr_price  # last bar: no next bar, use close as fallback
+                    if sig == ScalpingSignal.BUY:
+                        open_trades.append({
+                            "type": ScalpingSignal.BUY,
+                            "entry_price": entry_price,
+                            "tp": entry_price + self.tp_dist,
+                            "sl": entry_price - self.sl_dist,
+                            "breakeven_activated": False,
+                            "open_bar": i
+                        })
+                    else:
+                        open_trades.append({
+                            "type": ScalpingSignal.SELL,
+                            "entry_price": entry_price,
+                            "tp": entry_price - self.tp_dist,
+                            "sl": entry_price + self.sl_dist,
+                            "breakeven_activated": False,
+                            "open_bar": i
+                        })
 
             # 3. Peak & Drawdown track
             equity = balance + sum(
@@ -649,6 +665,25 @@ class Backtester:
                 max_drawdown = dd
             if dd_pct > max_drawdown_pct:
                 max_drawdown_pct = dd_pct
+
+        # Force-close any still-open trades at end of test (mark-to-market at last close)
+        for t in open_trades:
+            t_type = t.get("type")
+            t_entry = float(t.get("entry_price", curr_price))
+            if t_type == ScalpingSignal.BUY:
+                pnl = (curr_price - t_entry) / self.pip_size * (self.lot_size * 10.0)
+            else:
+                pnl = (t_entry - curr_price) / self.pip_size * (self.lot_size * 10.0)
+            balance += pnl
+            trades.append({
+                "id": len(trades) + 1,
+                "type": t_type,
+                "entry_price": t_entry,
+                "close_price": curr_price,
+                "pnl": round(pnl, 2),
+                "reason": "END_OF_TEST",
+                "bar": len(bars) - 1,
+            })
 
         winning_trades = [t for t in trades if float(t.get("pnl", 0.0)) > 0]
         losing_trades = [t for t in trades if float(t.get("pnl", 0.0)) < 0]

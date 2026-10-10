@@ -3,4 +3,10 @@ uvicorn[standard]
 python-multipart
 pytest
 pytest-asyncio
+pytest-cov
 psutil
+numpy
+pandas
+requests
+httpx
+# MetaTrader5 is Windows-only; install manually: pip install MetaTrader5
