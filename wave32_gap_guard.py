@@ -27,7 +27,7 @@ class GapGuard:
         self._last_gap_pips: float = 0.0
         self._total_gaps: int = 0
         self._total_blocks: int = 0
-        self._created_at: float = time.time()
+        self._created_at: float = time.monotonic()
 
     def update_price(self, price: float) -> None:
         """Feed latest tick. Triggers block if gap is detected."""
@@ -35,7 +35,7 @@ class GapGuard:
         if self._last_price > 0:
             gap_raw = abs(price - self._last_price)
             if gap_raw >= self._gap_threshold:
-                self._gap_detected_at = time.time()
+                self._gap_detected_at = time.monotonic()
                 self._last_gap_pips = round(gap_raw / self._pip_size, 1)
                 self._total_gaps += 1
                 self._total_blocks += 1
@@ -52,7 +52,7 @@ class GapGuard:
         """
         if self._gap_detected_at == 0:
             return (True, "no_gap")
-        elapsed = time.time() - self._gap_detected_at
+        elapsed = time.monotonic() - self._gap_detected_at
         if elapsed < self._block_duration:
             remaining = round(self._block_duration - elapsed, 1)
             return (False, f"gap_block_{remaining}s_remaining_gap={self._last_gap_pips}pips")
@@ -60,7 +60,7 @@ class GapGuard:
 
     def info(self) -> dict:
         allowed, reason = self.is_trading_allowed()
-        elapsed = time.time() - self._gap_detected_at if self._gap_detected_at else 0
+        elapsed = time.monotonic() - self._gap_detected_at if self._gap_detected_at else 0
         remaining = max(0.0, self._block_duration - elapsed) if self._gap_detected_at else 0.0
         return {
             "trading_allowed": allowed,
@@ -72,6 +72,7 @@ class GapGuard:
             "total_trade_blocks": self._total_blocks,
             "gap_threshold_pips": self._gap_threshold / self._pip_size,
         }
+
 
 
 # Module-level singleton

@@ -1,0 +1,14 @@
+{
+  "status": "ACTIVE_SCALPING",
+  "symbol": "XAUUSD",
+  "current_price": 2410.5,
+  "balance": 10000.0,
+  "equity": 10000.0,
+  "daily_pnl": 0.0,
+  "open_positions": [],
+  "total_trades": 0,
+  "win_rate_pct": 0.0,
+  "last_signal": "HOLD",
+  "spread_pips": 2.0,
+  "updated_at": "2026-10-10T12:14:58.752324Z"
+}

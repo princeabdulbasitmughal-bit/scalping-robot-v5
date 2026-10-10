@@ -9,6 +9,7 @@ import time
 import json
 import random
 import logging
+import shutil
 from pathlib import Path
 from typing import Any, Optional
 
@@ -24,6 +25,7 @@ def atomic_write_json(
     """
     Atomically writes JSON data to file_path using a temporary file in the same directory.
     Uses os.replace for atomic replacement and exponential jitter backoff for Windows lock retries.
+    Also updates a <file>.bak backup on each successful write for corruption recovery.
     """
     path = Path(file_path).resolve()
     dir_path = path.parent
@@ -48,6 +50,12 @@ def atomic_write_json(
         for attempt in range(1, max_retries + 1):
             try:
                 os.replace(temp_path, path)
+                # Update backup on each successful write so .bak is always the last known-good copy
+                try:
+                    bak_path = path.with_suffix(path.suffix + ".bak")
+                    shutil.copy2(path, bak_path)
+                except Exception as bak_err:
+                    logger.debug(f"[STORAGE] Failed to update .bak for {path}: {bak_err}")
                 return True
             except (PermissionError, OSError) as err:
                 last_err = err
@@ -82,6 +90,8 @@ def safe_read_json(
     """
     Safely reads JSON data from file_path with ultra-fast binary read buffer
     and retries on transient read locks or partial writes.
+    On permanent JSON corruption (JSONDecodeError), attempts to recover from
+    the <file>.bak backup before falling back to `default`.
     Returns `default` if the file doesn't exist or cannot be parsed.
     """
     path = Path(file_path).resolve()
@@ -102,7 +112,26 @@ def safe_read_json(
                 time.sleep(sleep_time)
                 continue
             return json.loads(raw_bytes.decode("utf-8"))
-        except (json.JSONDecodeError, PermissionError, OSError, UnicodeDecodeError) as err:
+        except json.JSONDecodeError as err:
+            # Permanent corruption — retrying the same file will always fail.
+            # Attempt .bak recovery once, then fall through to default.
+            last_err = err
+            logger.warning(f"[STORAGE] JSONDecodeError on {path}: {err} — attempting .bak recovery")
+            bak_path = path.with_suffix(path.suffix + ".bak")
+            if bak_path.exists():
+                try:
+                    with open(bak_path, "rb") as bf:
+                        bak_bytes = bf.read()
+                    if bak_bytes:
+                        recovered = json.loads(bak_bytes.decode("utf-8"))
+                        logger.info(f"[STORAGE] Recovered {path} from .bak successfully")
+                        return recovered
+                except Exception as bak_err:
+                    logger.warning(f"[STORAGE] .bak recovery also failed for {path}: {bak_err}")
+            # No usable .bak — break immediately; further retries are pointless
+            break
+        except (PermissionError, OSError, UnicodeDecodeError) as err:
+            # Transient I/O errors — worth retrying with backoff
             last_err = err
             sleep_time = (retry_delay * (1.5 ** attempt)) + random.uniform(0.005, 0.02)
             if sleep_time > 5.0:
