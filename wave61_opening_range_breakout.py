@@ -24,6 +24,24 @@ _ORB_WINDOW_SECONDS = 1800      # 30 minutes
 _MIN_TICKS = 10                 # minimum ticks before filter activates
 
 
+class BlockResult(int):
+    def __new__(cls, blocked: bool, reason: str = ""):
+        obj = super().__new__(cls, 1 if blocked else 0)
+        obj.blocked = bool(blocked)
+        obj.reason = reason
+        return obj
+
+    def __iter__(self):
+        yield self.blocked
+        yield self.reason
+
+    def __bool__(self):
+        return self.blocked
+
+    def __repr__(self):
+        return f"BlockResult({self.blocked}, '{self.reason}')"
+
+
 class OpeningRangeBreakout:
     """
     Opening Range Breakout filter.
@@ -34,6 +52,11 @@ class OpeningRangeBreakout:
       - SELL if price >= OR_low  (no confirmed breakout down)
 
     Resets at each new session open.
+
+    Session detection uses a time-window approach rather than minute==0,
+    so a reset is triggered for any tick that arrives within the first
+    _ORB_WINDOW_SECONDS/2 (15 min) of a session hour that we haven't
+    already started tracking.
     """
 
     def __init__(self):
@@ -44,24 +67,26 @@ class OpeningRangeBreakout:
         self._window_complete: bool = False
         self._tick_count: int = 0
         self._last_price: float = 0.0
-        self._last_session_hour: int = -1
+        self._last_session_hour: int = -1   # which session hour we last started
 
     # ------------------------------------------------------------------
     def _check_session_reset(self):
-        """Reset if a new London or NY session has opened."""
+        """Reset when we detect a new London or NY session opening.
+
+        Uses a 15-minute grace window so the reset fires even if no tick
+        arrives at exactly minute=0.
+        """
         now_utc = time.gmtime()
         hour = now_utc.tm_hour
         minute = now_utc.tm_min
 
-        # Check if we are in the first minute of a session open
-        is_session_open = (
-            (hour == _LONDON_OPEN_UTC_HOUR and minute == 0) or
-            (hour == _NY_OPEN_UTC_HOUR and minute == 0)
-        )
+        is_session_hour = (hour == _LONDON_OPEN_UTC_HOUR or hour == _NY_OPEN_UTC_HOUR)
+        within_grace = minute < 15   # first 15 minutes of the hour
 
-        # Only reset once per session (track last session hour)
-        if is_session_open and hour != self._last_session_hour:
-            self._session_start = time.time()
+        # Reset once per session hour: only when we're inside a session-open
+        # hour AND we haven't already started this hour's window.
+        if is_session_hour and within_grace and hour != self._last_session_hour:
+            self._session_start = time.time() - (minute * 60)  # backdate to exact open
             self._or_high = None
             self._or_low = None
             self._in_window = True
@@ -97,24 +122,7 @@ class OpeningRangeBreakout:
             self._or_low = price
         self._tick_count += 1
 
-class BlockResult(int):
-    def __new__(cls, blocked: bool, reason: str = ""):
-        obj = super().__new__(cls, 1 if blocked else 0)
-        obj.blocked = bool(blocked)
-        obj.reason = reason
-        return obj
-
-    def __iter__(self):
-        yield self.blocked
-        yield self.reason
-
-    def __bool__(self):
-        return self.blocked
-
-    def __repr__(self):
-        return f"BlockResult({self.blocked}, '{self.reason}')"
-
-
+    # ------------------------------------------------------------------
     def is_signal_blocked(self, signal: str):
         """
         Returns BlockResult (behaves as both bool and (blocked, reason) tuple).

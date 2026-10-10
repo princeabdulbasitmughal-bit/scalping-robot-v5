@@ -22,6 +22,24 @@ _EMA_PERIOD = 50
 _EMA_ALPHA = 2.0 / (_EMA_PERIOD + 1)
 
 
+class BlockResult(int):
+    def __new__(cls, blocked: bool, reason: str = ""):
+        obj = super().__new__(cls, 1 if blocked else 0)
+        obj.blocked = bool(blocked)
+        obj.reason = reason
+        return obj
+
+    def __iter__(self):
+        yield self.blocked
+        yield self.reason
+
+    def __bool__(self):
+        return self.blocked
+
+    def __repr__(self):
+        return f"BlockResult({self.blocked}, '{self.reason}')"
+
+
 class MATrendFilter:
     """
     EMA-50 trend alignment filter.
@@ -66,24 +84,6 @@ class MATrendFilter:
 
     def get_ema(self) -> float:
         return self._ema
-
-class BlockResult(int):
-    def __new__(cls, blocked: bool, reason: str = ""):
-        obj = super().__new__(cls, 1 if blocked else 0)
-        obj.blocked = bool(blocked)
-        obj.reason = reason
-        return obj
-
-    def __iter__(self):
-        yield self.blocked
-        yield self.reason
-
-    def __bool__(self):
-        return self.blocked
-
-    def __repr__(self):
-        return f"BlockResult({self.blocked}, '{self.reason}')"
-
 
     def is_signal_blocked(self, signal: str):
         """
