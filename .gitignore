@@ -23,3 +23,4 @@ KILL_SWITCH
 E_STOP.flag
 backups/
 tunnel_url.txt
+*.bak
