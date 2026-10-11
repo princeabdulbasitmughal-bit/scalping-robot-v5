@@ -35,7 +35,7 @@ import argparse
 import traceback
 import threading
 import collections
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Union
 import urllib.request
@@ -392,7 +392,7 @@ class MT5LiveTrader:
             logger.debug(f"[INIT] Could not restore last_trade_time: {e}")
 
         # ── Circuit Breaker & Risk Tracking ──────────────────────────────────
-        self._last_reset_date = datetime.utcnow().date()
+        self._last_reset_date = datetime.now(timezone.utc).date()
         self._last_daily_reset = self._last_reset_date
         self.trading_halted: bool = False
         self._profit_target_hit: bool = False
@@ -810,7 +810,7 @@ class MT5LiveTrader:
         Returns: (is_news_time, formatted_HH_MM)
         """
         if now_dt is None:
-            now_dt = datetime.utcnow()
+            now_dt = datetime.now(timezone.utc)
         cur_min = now_dt.hour * 60 + now_dt.minute
         news_targets = [(8, 30), (12, 30), (14, 0), (17, 0), (20, 30)]
         for nh, nm in news_targets:
@@ -854,7 +854,7 @@ class MT5LiveTrader:
         Skip entries 21:45-22:15 UTC (broker rollover period).
         """
         if now_dt is None:
-            now_dt = datetime.utcnow()
+            now_dt = datetime.now(timezone.utc)
         cur_min = now_dt.hour * 60 + now_dt.minute
         # 21:45 is 21*60 + 45 = 1305; 22:15 is 22*60 + 15 = 1335
         return 1305 <= cur_min <= 1335
@@ -956,7 +956,7 @@ class MT5LiveTrader:
             analytics = self._calculate_analytics()
             analytics_payload = dict(analytics)
             analytics_payload["total_trades"] = len(self.trade_history)
-            analytics_payload["updated_at"] = datetime.utcnow().isoformat() + "Z"
+            analytics_payload["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
             atomic_write_json(ANALYTICS_FILE, analytics_payload)
             logger.info(f"[ANALYTICS] Wrote analytics.json after {self._trades_closed_count} trades.")
         except Exception as exc:
@@ -1182,7 +1182,7 @@ class MT5LiveTrader:
                             "type": pos_type,
                             "entry": pos_entry,
                             "close_price": price,
-                            "close_time": datetime.utcnow().isoformat() + "Z",
+                            "close_time": datetime.now(timezone.utc).isoformat() + "Z",
                             "lot_size": close_lot,
                             "pnl": part_pnl,
                             "close_reason": "PARTIAL_TP_50"
@@ -1240,12 +1240,12 @@ class MT5LiveTrader:
                     self.daily_trades += 1
                     pos["pnl"] = round(pnl, 2)
                     pos["close_price"] = price
-                    pos["close_time"] = datetime.utcnow().isoformat() + "Z"
+                    pos["close_time"] = datetime.now(timezone.utc).isoformat() + "Z"
                     self.last_trade_time = pos["close_time"]
                     self.trades_history.append(pos)
 
                     trade_record = {
-                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
                         "direction": str(pos.get("type", "")),
                         "entry_price": float(pos.get("entry", 0.0)),
                         "exit_price": float(price),
@@ -1552,8 +1552,8 @@ class MT5LiveTrader:
             lot_size = self._get_dynamic_lot(self.balance)
 
             # ─── DAILY RESET at exactly 00:00 UTC ────────────────────────────────────
-            if datetime.utcnow().date() != self._last_reset_date:
-                today_utc = datetime.utcnow().date()
+            if datetime.now(timezone.utc).date() != self._last_reset_date:
+                today_utc = datetime.now(timezone.utc).date()
                 if hasattr(self, "_last_reset_date") and self._last_reset_date is not None:
                     # ── Log daily summary before zeroing counters ──
                     total_day = self.daily_wins + self.daily_losses
@@ -1764,13 +1764,13 @@ class MT5LiveTrader:
                         self.daily_trades += 1
                         pos["pnl"] = round(pnl, 2)
                         pos["close_price"] = price
-                        pos["close_time"] = datetime.utcnow().isoformat() + "Z"
+                        pos["close_time"] = datetime.now(timezone.utc).isoformat() + "Z"
                         self.last_trade_time = pos["close_time"]
                         self.trades_history.append(pos)
 
                         # Performance Analytics: append trade dict (max 100 entries)
                         trade_record = {
-                            "timestamp": datetime.utcnow().isoformat() + "Z",
+                            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
                             "direction": str(pos.get("type", "")),
                             "entry_price": float(pos.get("entry", 0.0)),
                             "exit_price": float(price),
@@ -1828,7 +1828,7 @@ class MT5LiveTrader:
                         if open_time_str:
                             try:
                                 open_dt = datetime.fromisoformat(open_time_str.rstrip("Z"))
-                                minutes_open = (datetime.utcnow() - open_dt).total_seconds() / 60.0
+                                minutes_open = (datetime.now(timezone.utc) - open_dt).total_seconds() / 60.0
                                 pos_lot = float(pos.get("lot_size", lot_size))
                                 pos_entry = float(pos.get("entry", price))
                                 # Calculate floating PnL for this position
@@ -1853,7 +1853,7 @@ class MT5LiveTrader:
                                     self.daily_trades += 1
                                     pos["pnl"] = round(pnl, 2)
                                     pos["close_price"] = price
-                                    pos["close_time"] = datetime.utcnow().isoformat() + "Z"
+                                    pos["close_time"] = datetime.now(timezone.utc).isoformat() + "Z"
                                     pos["close_reason"] = close_reason
                                     self.last_trade_time = pos["close_time"]
                                     self.trades_history.append(pos)
@@ -1954,7 +1954,7 @@ class MT5LiveTrader:
                         logger.debug(f"[RISK GATE] error: {_e}")
 
                 if signal in [ScalpingSignal.BUY, ScalpingSignal.SELL]:
-                    now_utc = datetime.utcnow()
+                    now_utc = datetime.now(timezone.utc)
 
                     # a. News time buffer: skip entry if UTC hour:minute within 5 min of: 08:30, 12:30, 14:00, 17:00, 20:30
                     is_news, news_time_str = self.check_news_time_buffer(now_utc)
@@ -2175,7 +2175,7 @@ class MT5LiveTrader:
                             "requested_price": price,
                             "sl": sl,
                             "tp": tp,
-                            "open_time": datetime.utcnow().isoformat() + "Z",
+                            "open_time": datetime.now(timezone.utc).isoformat() + "Z",
                             "spread_pips": self.spread_pips,
                             "dynamic_deviation": dynamic_deviation
                         }
@@ -2218,7 +2218,7 @@ class MT5LiveTrader:
           - London  : 08:00-17:00 UTC (with 30-min buffer: 07:30-17:30 UTC)
           - New York: 13:00-22:00 UTC (with 30-min buffer: 12:30-22:30 UTC)
         Dead zone between NY close and Tokyo open with 30-min buffer: 22:30-23:30 UTC (~1 hr)."""
-        now_utc = datetime.utcnow()
+        now_utc = datetime.now(timezone.utc)
         # High precision decimal UTC hour (e.g. 08:30 = 8.5)
         utc_hour = now_utc.hour + now_utc.minute / 60.0 + now_utc.second / 3600.0
         buffer_hours = 0.5  # 30-minute buffer between sessions
@@ -2243,7 +2243,7 @@ class MT5LiveTrader:
         Volatility by session: Tokyo=low(0.02), London=medium(0.08), NY=high(0.12).
         Multiplies simulated price drift based on active market session (UTC).
         """
-        now_utc = datetime.utcnow()
+        now_utc = datetime.now(timezone.utc)
         utc_hour = now_utc.hour + now_utc.minute / 60.0
         # New York session: 13:00-22:00 UTC (high volatility = 0.12)
         if 13.0 <= utc_hour < 22.0:
@@ -2585,7 +2585,7 @@ class MT5LiveTrader:
                 "requested_price": order_price,
                 "sl": sl,
                 "tp": tp,
-                "open_time": datetime.utcnow().isoformat() + "Z",
+                "open_time": datetime.now(timezone.utc).isoformat() + "Z",
                 "spread_pips": task.get("spread_pips", self.spread_pips),
                 "slippage_points": slippage_points,
                 "slippage_pips": slippage_pips,
@@ -2632,7 +2632,7 @@ class MT5LiveTrader:
                             "requested_price": order_price,
                             "sl": sl,
                             "tp": tp,
-                            "open_time": datetime.utcnow().isoformat() + "Z",
+                            "open_time": datetime.now(timezone.utc).isoformat() + "Z",
                             "spread_pips": task.get("spread_pips", self.spread_pips),
                             "slippage_pips": slippage_pips
                         }
@@ -2715,7 +2715,7 @@ class MT5LiveTrader:
                 else:
                     last_trades_snapshot = [
                         {
-                            "timestamp": t.get("close_time", datetime.utcnow().isoformat() + "Z"),
+                            "timestamp": t.get("close_time", datetime.now(timezone.utc).isoformat() + "Z"),
                             "direction": str(t.get("type", "")),
                             "entry_price": float(t.get("entry", 0.0)),
                             "exit_price": float(t.get("close_price", 0.0)),
@@ -2750,7 +2750,7 @@ class MT5LiveTrader:
                 daily_loss_val = round(abs(daily_pnl_val), 2) if daily_pnl_val < 0.0 else round(self.daily_loss, 2)
 
                 # Timestamps and session
-                now_iso = datetime.utcnow().isoformat() + "Z"
+                now_iso = datetime.now(timezone.utc).isoformat() + "Z"
                 tunnel_url_val = self._get_tunnel_url()
                 session_active_val = bool(self._in_trading_session())
 
