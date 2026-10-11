@@ -11,8 +11,9 @@ import json
 import time
 import logging
 import argparse
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # File Paths
 BASE_DIR = Path(__file__).resolve().parent
@@ -26,8 +27,10 @@ logger.setLevel(logging.INFO)
 
 # Avoid duplicate handlers if reloaded
 if not logger.handlers:
-    # File handler
-    file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    # Rotating File Handler — prevents unbounded disk growth in daemon mode
+    file_handler = RotatingFileHandler(
+        LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
     file_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     file_handler.setFormatter(file_formatter)
     logger.addHandler(file_handler)
@@ -57,6 +60,16 @@ def calculate_grade(win_rate: float) -> str:
         return "C"
 
 
+def _safe_float(val, default: float = 0.0) -> float:
+    """Safely convert a value to float; returns default on None, str, or invalid values."""
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 def evaluate_and_report() -> bool:
     """
     Reads live_status.json, evaluates performance metrics,
@@ -69,29 +82,38 @@ def evaluate_and_report() -> bool:
         logger.error(msg)
         return False
 
-    try:
-        with open(STATUS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to read/parse {STATUS_FILE}: {e}")
+    data = None
+    for _attempt in range(3):
+        try:
+            with open(STATUS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            break
+        except json.JSONDecodeError:
+            if _attempt < 2:
+                time.sleep(0.2)
+        except Exception as e:
+            logger.error(f"Failed to read/parse {STATUS_FILE}: {e}")
+            return False
+    if data is None:
+        logger.error(f"Failed to parse {STATUS_FILE} after 3 attempts (concurrent write?)")
         return False
 
-    # Extract metrics
-    status = data.get("status", "UNKNOWN")
-    account_mode = data.get("account_mode", "UNKNOWN")
-    broker_name = data.get("broker_name", "N/A")
-    account_id = data.get("account_id", data.get("broker_login", "N/A"))
-    symbol = data.get("symbol", "N/A")
-    current_price = data.get("current_price", 0.0)
-    balance = data.get("balance", 0.0)
-    equity = data.get("equity", 0.0)
-    margin_free = data.get("margin_free", 0.0)
-    daily_pnl = float(data.get("daily_pnl", 0.0))
-    total_trades = data.get("total_trades", 0)
+    # Extract metrics — use `or` / _safe_float to handle null JSON values safely
+    status = data.get("status") or "UNKNOWN"
+    account_mode = data.get("account_mode") or "UNKNOWN"
+    broker_name = data.get("broker_name") or "N/A"
+    account_id = data.get("account_id") or data.get("broker_login") or "N/A"
+    symbol = data.get("symbol") or "N/A"
+    current_price = _safe_float(data.get("current_price"), 0.0)
+    balance = _safe_float(data.get("balance"), 0.0)
+    equity = _safe_float(data.get("equity"), 0.0)
+    margin_free = _safe_float(data.get("margin_free"), 0.0)
+    daily_pnl = _safe_float(data.get("daily_pnl"), 0.0)
+    total_trades = int(data.get("total_trades") or 0)
 
-    # Win rate parsing (handles win_rate or win_rate_pct)
-    raw_win_rate = data.get("win_rate", data.get("win_rate_pct", 0.0))
-    win_rate = float(raw_win_rate)
+    # Win rate parsing (handles win_rate or win_rate_pct, including null)
+    raw_win_rate = data.get("win_rate") if data.get("win_rate") is not None else data.get("win_rate_pct")
+    win_rate = _safe_float(raw_win_rate, 0.0)
     # If represented as a ratio <= 1.0 (e.g. 0.905), convert to percentage
     if 0.0 < win_rate <= 1.0 and total_trades > 0:
         win_rate *= 100.0
@@ -123,9 +145,8 @@ def evaluate_and_report() -> bool:
     _count = data.get("open_positions_count")
     open_positions_count = _count if isinstance(_count, int) else len(open_positions)
     latency_metrics = data.get("latency_metrics", {})
-    from datetime import timezone as _tz
-    updated_at = data.get("updated_at", datetime.now(_tz.utc).isoformat())
-    current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    updated_at = data.get("updated_at") or datetime.now(timezone.utc).isoformat()
+    current_time_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     # Generate Performance Report Content
     report_lines = [

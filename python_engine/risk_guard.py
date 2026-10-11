@@ -5,11 +5,15 @@ All limits only tighten, never loosen. Fail-closed on all errors or invalid data
 """
 from datetime import datetime, timezone
 import json
+import logging
 import math
 import os
 from pathlib import Path
+import threading
 import time
 from typing import Any, Callable, Dict, Optional, Union
+
+logger = logging.getLogger("ScalpingRobotV5.RiskGuard")
 
 
 class Decision(dict):
@@ -50,46 +54,55 @@ class RiskGuard:
     ):
         self.config = dict(config) if config else {}
         self.clock = clock
+        self._lock = threading.RLock()
 
         # State persistence path
         if state_path is not None:
             self.state_path = Path(state_path)
         elif "risk_state_path" in self.config:
             self.state_path = Path(self.config["risk_state_path"])
+        elif os.environ.get("RISK_STATE_PATH"):
+            self.state_path = Path(os.environ["RISK_STATE_PATH"])
         else:
             self.state_path = Path(__file__).resolve().parent.parent / "risk_state.json"
 
         # Kill switch file path
         if "kill_switch_path" in self.config:
             self.kill_switch_path = Path(self.config["kill_switch_path"])
+        elif os.environ.get("KILL_SWITCH_PATH"):
+            self.kill_switch_path = Path(os.environ["KILL_SWITCH_PATH"])
         else:
             self.kill_switch_path = Path(__file__).resolve().parent.parent / "KILL_SWITCH"
 
         self.state: Dict[str, Any] = {}
-        self._load_state()
+        with self._lock:
+            self._load_state()
 
     def _get_current_utc_date(self) -> str:
         """Returns the current date in YYYY-MM-DD format according to UTC."""
-        return datetime.fromtimestamp(self.clock(), tz=timezone.utc).strftime("%Y-%m-%d")
+        try:
+            return datetime.fromtimestamp(self.clock(), tz=timezone.utc).strftime("%Y-%m-%d")
+        except Exception:
+            return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     def _load_state(self) -> None:
-        """Loads persistent state or initializes a clean one."""
-        today = self._get_current_utc_date()
-        default_state = {
-            "date_utc": today,
-            "daily_pnl": 0.0,
-            "daily_loss_halted": False,
-            "balance_floor_halted": False,
-            "trade_count_today": 0,
-            "last_trade_time": 0.0,
-        }
-
-        if not self.state_path.exists():
-            self.state = default_state
-            self._save_state()
-            return
-
+        """Loads persistent state or initializes a clean one. Caller must hold self._lock."""
         try:
+            today = self._get_current_utc_date()
+            default_state = {
+                "date_utc": today,
+                "daily_pnl": 0.0,
+                "daily_loss_halted": False,
+                "balance_floor_halted": False,
+                "trade_count_today": 0,
+                "last_trade_time": 0.0,
+            }
+
+            if not self.state_path.exists():
+                self.state = default_state
+                self._save_state()
+                return
+
             with open(self.state_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
@@ -123,6 +136,8 @@ class RiskGuard:
                     "last_trade_time": float(data.get("last_trade_time", 0.0)),
                 }
         except Exception:
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            logger.error("RiskGuard: Failed to load state — failing CLOSED", exc_info=True)
             # Invariant 9: Fail closed if an existing state file is corrupted
             self.state = {
                 "date_utc": today,
@@ -134,59 +149,87 @@ class RiskGuard:
             }
 
     def _save_state(self) -> None:
-        """Persists risk state atomically."""
+        """Persists risk state atomically. Caller must hold self._lock."""
+        tmp_path = None
         try:
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = self.state_path.with_suffix(".tmp")
+            # Use PID + thread ID + nanosecond timestamp to avoid Windows file-lock conflicts
+            tmp_name = f"{self.state_path.name}.tmp.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}"
+            tmp_path = self.state_path.with_name(tmp_name)
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(self.state, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
             tmp_path.replace(self.state_path)
+            tmp_path = None
         except Exception:
-            pass
+            logger.error("RiskGuard: Failed to save state to %s", self.state_path, exc_info=True)
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     def _check_day_rollover(self) -> None:
         """Checks if UTC day has changed and resets daily metrics if so."""
-        today = self._get_current_utc_date()
-        if self.state.get("date_utc") != today:
-            # Daily reset only on UTC day rollover
-            balance_floor_halted = bool(self.state.get("balance_floor_halted", False))
-            self.state["date_utc"] = today
-            self.state["daily_pnl"] = 0.0
-            self.state["daily_loss_halted"] = False
-            # Balance-floor halt remains permanent!
-            self.state["balance_floor_halted"] = balance_floor_halted
-            self.state["trade_count_today"] = 0
-            self._save_state()
+        try:
+            with self._lock:
+                today = self._get_current_utc_date()
+                if self.state.get("date_utc") != today:
+                    # Daily reset only on UTC day rollover
+                    balance_floor_halted = bool(self.state.get("balance_floor_halted", False))
+                    self.state["date_utc"] = today
+                    self.state["daily_pnl"] = 0.0
+                    self.state["daily_loss_halted"] = False
+                    # Balance-floor halt remains permanent!
+                    self.state["balance_floor_halted"] = balance_floor_halted
+                    self.state["trade_count_today"] = 0
+                    self._save_state()
+        except Exception:
+            logger.error("RiskGuard: Exception in _check_day_rollover", exc_info=True)
 
     def record_trade(self, pnl: float, timestamp: Optional[float] = None) -> None:
         """
         Records a completed trade's PnL to update daily metrics.
+        CRITICAL: On failure, sets daily_loss_halted=True (fail-closed) to prevent
+        trading past max daily loss limit if state update fails.
         """
         try:
-            self._check_day_rollover()
-            self.state["daily_pnl"] = round(self.state.get("daily_pnl", 0.0) + float(pnl), 2)
-            self.state["trade_count_today"] = self.state.get("trade_count_today", 0) + 1
-            now = float(timestamp if timestamp is not None else self.clock())
-            self.state["last_trade_time"] = now
+            with self._lock:
+                self._check_day_rollover()
+                self.state["daily_pnl"] = round(self.state.get("daily_pnl", 0.0) + float(pnl), 2)
+                self.state["trade_count_today"] = self.state.get("trade_count_today", 0) + 1
+                now = float(timestamp if timestamp is not None else self.clock())
+                self.state["last_trade_time"] = now
 
-            max_daily_loss = float(self.config.get("max_daily_loss_usd", 200.0))
-            if self.state["daily_pnl"] <= -max_daily_loss:
-                self.state["daily_loss_halted"] = True
+                max_daily_loss = float(self.config.get("max_daily_loss_usd", 200.0))
+                if self.state["daily_pnl"] <= -max_daily_loss:
+                    self.state["daily_loss_halted"] = True
 
-            self._save_state()
+                self._save_state()
         except Exception:
-            pass
+            logger.error("RiskGuard: record_trade() failed — setting daily_loss_halted=True (fail-closed)", exc_info=True)
+            # FAIL-CLOSED: If we can't record trade PnL, halt trading immediately
+            # to prevent exceeding max daily loss limit undetected
+            try:
+                with self._lock:
+                    self.state["daily_loss_halted"] = True
+                    self._save_state()
+            except Exception:
+                pass
 
     def reset_balance_floor(self) -> None:
         """Manual reset for balance floor halt."""
-        self.state["balance_floor_halted"] = False
-        self._save_state()
+        with self._lock:
+            self.state["balance_floor_halted"] = False
+            self._save_state()
 
     def reset_daily_loss(self) -> None:
         """Manual reset for daily loss halt."""
-        self.state["daily_loss_halted"] = False
-        self.state["daily_pnl"] = 0.0
-        self._save_state()
+        with self._lock:
+            self.state["daily_loss_halted"] = False
+            self.state["daily_pnl"] = 0.0
+            self._save_state()
 
     def check_order(self, order: dict, account: dict, market: dict) -> Decision:
         """
@@ -379,6 +422,9 @@ class RiskGuard:
             pip_size = float(raw_pip) if _is_valid_num(raw_pip) and float(raw_pip) > 0 else 0.1
 
             sl_distance = abs(price - sl)
+            # Guard: pip_size already sanitized above but re-validate for subnormal/NaN before division
+            if not math.isfinite(pip_size) or pip_size <= 0.0:
+                return Decision(False, "FAIL_CLOSED: Invalid pip_size prevents SL distance calculation", 0.0)
             sl_pips = sl_distance / pip_size
 
             raw_min_sl = self.config.get("min_sl_pips", 5.0)
@@ -445,12 +491,21 @@ class RiskGuard:
             dollar_risk = working_lot * sl_distance * contract_size
 
             if dollar_risk > max_risk_dollars:
-                # Reduce lot size to safe ceiling
-                safe_raw_lot = max_risk_dollars / (sl_distance * contract_size)
+                # Reduce lot size to safe ceiling — guard denominator before division
+                risk_denom = sl_distance * contract_size
+                if risk_denom <= 0.0 or not math.isfinite(risk_denom):
+                    return Decision(False, "FAIL_CLOSED: Invalid risk denominator (sl_distance * contract_size)", 0.0)
+                safe_raw_lot = max_risk_dollars / risk_denom
                 working_lot = min(working_lot, safe_raw_lot)
 
             # Invariant 2: Normalize lot size to lot_step (floor down)
-            steps = math.floor(round(working_lot / lot_step, 6))
+            # Guard lot_step for subnormal/NaN before division to prevent math.floor(inf) OverflowError
+            if not math.isfinite(lot_step) or lot_step <= 0.0:
+                return Decision(False, "FAIL_CLOSED: Invalid lot_step prevents lot quantization", 0.0)
+            raw_steps = working_lot / lot_step
+            if not math.isfinite(raw_steps):
+                return Decision(False, f"FAIL_CLOSED: lot quantization produced non-finite value ({raw_steps})", 0.0)
+            steps = math.floor(round(raw_steps, 6))
             quantized_lot = round(steps * lot_step, 4)
 
             # Re-verify against broker limits and effective max lot
