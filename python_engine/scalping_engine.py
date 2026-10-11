@@ -95,27 +95,27 @@ class EconomicNewsFilter:
         from datetime import timedelta
         import calendar as cal
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         events_added = []
 
         def first_friday(year, month):
-            """Return datetime of first Friday in given month."""
+            """Return datetime of first Friday in given month (UTC-aware)."""
             for day in range(1, 8):
-                d = datetime(year, month, day, 12, 30, 0)
+                d = datetime(year, month, day, 12, 30, 0, tzinfo=timezone.utc)
                 if d.weekday() == 4:  # Friday
                     return d
-            return datetime(year, month, 7, 12, 30, 0)
+            return datetime(year, month, 7, 12, 30, 0, tzinfo=timezone.utc)
 
         def second_tuesday(year, month):
-            """Return datetime of second Tuesday (≈CPI release)."""
+            """Return datetime of second Tuesday (≈CPI release, UTC-aware)."""
             count = 0
             for day in range(1, 15):
-                d = datetime(year, month, day, 12, 30, 0)
+                d = datetime(year, month, day, 12, 30, 0, tzinfo=timezone.utc)
                 if d.weekday() == 1:  # Tuesday
                     count += 1
                     if count == 2:
                         return d
-            return datetime(year, month, 14, 12, 30, 0)
+            return datetime(year, month, 14, 12, 30, 0, tzinfo=timezone.utc)
 
         # Generate NFP and CPI for next 4 months (robust month overflow with divmod)
         for offset in range(0, 5):
@@ -138,7 +138,7 @@ class EconomicNewsFilter:
         # FOMC meetings: approximately every 6-7 weeks — estimate next 4
         # Starting from a known FOMC base date and projecting forward
         fomc_interval_days = 45  # approx 6.5 weeks
-        fomc_base = datetime(now.year, now.month, 1, 19, 0, 0)
+        fomc_base = datetime(now.year, now.month, 1, 19, 0, 0, tzinfo=timezone.utc)
         for i in range(6):
             candidate = fomc_base + timedelta(days=i * fomc_interval_days)
             if candidate > now:

@@ -35,20 +35,21 @@ def log(msg):
 
 
 def get_watchdog_pid():
-    """Return PID of running watchdog_runner.py process, or None."""
+    """Return PID of running watchdog_runner.py process, or None.
+
+    Uses psutil instead of a PowerShell WMI call to avoid a 10-second subprocess
+    spawn on every check cycle which was causing false-negative restarts.
+    """
     try:
-        result = subprocess.run(
-            [
-                "powershell", "-NoProfile", "-Command",
-                "Get-WmiObject Win32_Process -Filter \"Name='python.exe'\" | "
-                "Where-Object { $_.CommandLine -match 'watchdog_runner' } | "
-                "Select-Object -First 1 -ExpandProperty ProcessId"
-            ],
-            capture_output=True, text=True, timeout=10, cwd=BASE
-        )
-        pid_str = result.stdout.strip()
-        if pid_str.isdigit():
-            return int(pid_str)
+        import psutil
+        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+            try:
+                name = (proc.info.get("name") or "").lower()
+                cmdline = proc.info.get("cmdline") or []
+                if "python" in name and any("watchdog_runner" in arg for arg in cmdline):
+                    return proc.info["pid"]
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
     except Exception as e:
         log("PID check error: {}".format(e))
     return None

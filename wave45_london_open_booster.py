@@ -7,6 +7,7 @@ This is advisory — it modifies the min_score passed to the signal gate.
 
 import time
 import datetime
+from datetime import timezone
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ class LondonOpenBooster:
         self._discount = score_discount
 
     def _in_london_open(self) -> bool:
-        utc_hour = datetime.datetime.utcnow().hour
+        utc_hour = datetime.datetime.now(timezone.utc).hour
         return self._start <= utc_hour < self._end
 
     def adjust_min_score(self, min_score: float) -> float:

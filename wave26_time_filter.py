@@ -18,6 +18,7 @@ keyword detection (wave21).
 """
 from __future__ import annotations
 import datetime
+from datetime import timezone
 import logging
 from typing import Tuple
 
@@ -72,7 +73,7 @@ class TimeFilter:
         (False, reason) if it is inside a blocked window.
         """
         if now_utc is None:
-            now_utc = datetime.datetime.utcnow()
+            now_utc = datetime.datetime.now(timezone.utc)
 
         now_minutes = now_utc.hour * 60 + now_utc.minute
 
@@ -99,7 +100,7 @@ class TimeFilter:
     def info(self) -> dict:
         """Return status dict for live_status.json."""
         try:
-            now_utc = datetime.datetime.utcnow()
+            now_utc = datetime.datetime.now(timezone.utc)
             now_minutes = now_utc.hour * 60 + now_utc.minute
             # Find next release window in minutes
             next_release_in: int | None = None

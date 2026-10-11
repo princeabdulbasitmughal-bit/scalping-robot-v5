@@ -101,38 +101,45 @@ def _load_last_avoid_trading() -> bool:
 def run():
     logger.info("Gold News Fetcher started.")
     while True:
-        all_headlines = []
-        any_feed_succeeded = False
+        try:
+            all_headlines = []
+            any_feed_succeeded = False
 
-        for feed_url in RSS_FEEDS:
-            items = fetch_rss(feed_url)
-            if items is None:
-                logger.warning("Feed failed: %s — using last known state", feed_url)
-                continue  # Don't count failures as "no headlines"
-            any_feed_succeeded = True
-            all_headlines.extend(items)
-            logger.info("Fetched %d items from %s", len(items), feed_url)
+            for feed_url in RSS_FEEDS:
+                items = fetch_rss(feed_url)
+                if items is None:
+                    logger.warning("Feed failed: %s — using last known state", feed_url)
+                    continue  # Don't count failures as "no headlines"
+                any_feed_succeeded = True
+                all_headlines.extend(items)
+                logger.info("Fetched %d items from %s", len(items), feed_url)
 
-        if not any_feed_succeeded:
-            # FIX: FAIL-SAFE — all feeds failed, preserve last known avoid_trading state
-            last_state = _load_last_avoid_trading()
-            logger.error(
-                "ALL RSS FEEDS FAILED — preserving last avoid_trading=%s (fail-safe)", last_state
-            )
-            # Update last_checked timestamp but keep avoid_trading as-is
-            write_status(last_state, [], last_state)
-        else:
-            high_impact, matched = check_high_impact(all_headlines)
-            avoid_trading = high_impact
-
-            if high_impact:
-                logger.warning("HIGH IMPACT EVENT DETECTED: %s - Avoid trading!", matched[:80])
+            if not any_feed_succeeded:
+                # FIX: FAIL-SAFE — all feeds failed, preserve last known avoid_trading state
+                last_state = _load_last_avoid_trading()
+                logger.error(
+                    "ALL RSS FEEDS FAILED — preserving last avoid_trading=%s (fail-safe)", last_state
+                )
+                # Update last_checked timestamp but keep avoid_trading as-is
+                write_status(last_state, [], last_state)
             else:
-                logger.info("No high-impact events detected.")
+                high_impact, matched = check_high_impact(all_headlines)
+                avoid_trading = high_impact
 
-            write_status(high_impact, all_headlines, avoid_trading)
+                if high_impact:
+                    logger.warning("HIGH IMPACT EVENT DETECTED: %s - Avoid trading!", matched[:80])
+                else:
+                    logger.info("No high-impact events detected.")
 
-        time.sleep(900)  # 15 minutes
+                write_status(high_impact, all_headlines, avoid_trading)
+
+            time.sleep(900)  # 15 minutes
+
+        except Exception:  # pragma: no cover
+            logger.exception(
+                "Unhandled exception in gold_news_fetcher run loop — sleeping 60s before retry"
+            )
+            time.sleep(60)
 
 
 if __name__ == '__main__':

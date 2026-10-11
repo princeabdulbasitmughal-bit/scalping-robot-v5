@@ -6,7 +6,7 @@ Logs daily spread cost; blocks new entries if single-day spread cost > $50.
 
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 _MAX_DAILY_SPREAD_USD = 50.0      # block threshold per day
@@ -21,11 +21,11 @@ class SpreadCostTracker:
         self._daily_cost_usd = 0.0
         self._total_cost_usd = 0.0
         self._trade_count    = 0
-        self._current_day    = datetime.utcnow().date()
+        self._current_day    = datetime.now(timezone.utc).date()
         self._lock           = threading.Lock()
 
     def _reset_if_new_day(self) -> None:
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         if today != self._current_day:
             self._daily_cost_usd = 0.0
             self._current_day    = today

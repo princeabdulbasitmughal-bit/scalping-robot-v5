@@ -5,6 +5,7 @@ Tokyo: max 1.5 pips | London pre-open (06:00-07:00 UTC): max 2.0 pips | All othe
 """
 import time
 import datetime
+from datetime import timezone
 import logging
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ class SessionSpreadLimiter:
         Args:
             spread_pips: Current bid-ask spread in pips.
         """
-        utc_hour = datetime.datetime.utcnow().hour
+        utc_hour = datetime.datetime.now(timezone.utc).hour
         session = self._get_session(utc_hour)
         limit = _SESSION_LIMITS[session]
 

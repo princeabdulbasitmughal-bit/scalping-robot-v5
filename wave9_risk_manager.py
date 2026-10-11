@@ -13,7 +13,7 @@ import collections
 import json
 import os
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class RiskManager:
@@ -177,7 +177,7 @@ class RiskManager:
                 "equity_ema": round(self._equity_ema, 2),
                 "hard_halt": self._hard_halt,
                 "soft_halt_until": self._soft_halt_until,
-                "updated_at": datetime.utcnow().isoformat() + "Z"
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
             with open(path, "w") as f:
                 json.dump(state, f, indent=2)

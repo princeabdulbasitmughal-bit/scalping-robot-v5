@@ -10,7 +10,7 @@ import time
 import urllib.request
 import urllib.parse
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -33,7 +33,7 @@ DEFAULT_CONFIG = {
 
 def _log(msg: str):
     try:
-        ts = datetime.utcnow().strftime("%H:%M:%S")
+        ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
         with open(TELEGRAM_LOG_PATH, "a", encoding="utf-8") as f:
             f.write(f"[{ts}] {msg}\n")
     except Exception:
@@ -110,7 +110,7 @@ class TelegramAlerter:
             f"Entry: <b>{entry:.2f}</b>\n"
             f"SL: {sl:.2f} | TP: {tp:.2f}\n"
             f"Lot: {lot:.2f}\n"
-            f"Time: {datetime.utcnow().strftime('%H:%M:%S')} UTC"
+            f"Time: {datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC"
         )
         self.send_alert(msg)
 
@@ -125,7 +125,7 @@ class TelegramAlerter:
             f"PnL: <b>${pnl:+.2f}</b>\n"
             f"Reason: {reason}\n"
             f"Balance: ${balance:,.2f}\n"
-            f"Time: {datetime.utcnow().strftime('%H:%M:%S')} UTC"
+            f"Time: {datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC"
         )
         self.send_alert(msg)
 
@@ -137,7 +137,7 @@ class TelegramAlerter:
             f"Reason: <b>{reason}</b>\n"
             f"Balance: ${balance:,.2f}\n"
             f"Daily PnL: ${daily_pnl:+.2f}\n"
-            f"Time: {datetime.utcnow().strftime('%H:%M:%S')} UTC"
+            f"Time: {datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC"
         )
         self.send_alert(msg, force=True)
 
@@ -154,7 +154,7 @@ class TelegramAlerter:
             f"Daily PnL: <b>${daily_pnl:+.2f}</b>\n"
             f"Trades: {total_trades} (W:{wins} L:{losses})\n"
             f"Win Rate: <b>{win_rate:.1f}%</b> | Grade: <b>{grade}</b>\n"
-            f"Date: {datetime.utcnow().strftime('%Y-%m-%d')} UTC"
+            f"Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d')} UTC"
         )
         self.send_alert(msg, force=True)
 
