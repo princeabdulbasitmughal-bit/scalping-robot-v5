@@ -6,9 +6,10 @@ import smtplib
 import json
 import os
 import logging
+import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ DEFAULT_CONFIG = {
 
 class EmailAlerter:
     def __init__(self):
+        self._lock = threading.Lock()
         self.config = self._load_config()
 
     def _load_config(self):
@@ -55,16 +57,20 @@ class EmailAlerter:
 
     def _reload_config(self):
         """Reload config in case it was updated."""
-        self.config = self._load_config()
+        with self._lock:
+            self.config = self._load_config()
 
     def send_alert(self, subject, body):
         """Send email alert. Returns True on success, False on failure."""
         self._reload_config()
-        if not self.config.get('enabled', False):
+        with self._lock:
+            cfg = dict(self.config)
+
+        if not cfg.get('enabled', False):
             return False
-        from_email = self.config.get('from_email', '')
-        password = self.config.get('password', '')
-        to_email = self.config.get('to_email', '')
+        from_email = cfg.get('from_email', '')
+        password = cfg.get('password', '')
+        to_email = cfg.get('to_email', '')
         if not all([from_email, password, to_email]):
             email_log.warning("Email not configured - skipping alert: %s", subject)
             return False
@@ -73,11 +79,11 @@ class EmailAlerter:
             msg['From'] = from_email
             msg['To'] = to_email
             msg['Subject'] = '[GoldBot] ' + subject
-            timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+            timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
             full_body = body + '\n\n---\nGold Scalping Robot | ' + timestamp
             msg.attach(MIMEText(full_body, 'plain'))
-            smtp_host = self.config.get('smtp_host', 'smtp.gmail.com')
-            smtp_port = self.config.get('smtp_port', 587)
+            smtp_host = cfg.get('smtp_host', 'smtp.gmail.com')
+            smtp_port = cfg.get('smtp_port', 587)
             with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
                 server.ehlo()
                 server.starttls()
@@ -92,9 +98,11 @@ class EmailAlerter:
     def test_connection(self):
         """Test SMTP connection. Returns True if successful."""
         self._reload_config()
+        with self._lock:
+            cfg = dict(self.config)
         try:
-            smtp_host = self.config.get('smtp_host', 'smtp.gmail.com')
-            smtp_port = self.config.get('smtp_port', 587)
+            smtp_host = cfg.get('smtp_host', 'smtp.gmail.com')
+            smtp_port = cfg.get('smtp_port', 587)
             with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
                 server.ehlo()
                 server.starttls()

@@ -10,7 +10,7 @@ import time
 import json
 import random
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -43,7 +43,7 @@ class ScalpingLiveRunner:
                 "low": round(p - 0.5, 2),
                 "close": round(p, 2),
                 "volume": random.randint(10, 100),
-                "timestamp": datetime.fromtimestamp(now - (100 - i)*60).strftime("%Y-%m-%d %H:%M:%S")
+                "timestamp": datetime.fromtimestamp(now - (100 - i)*60, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             })
             self.current_price = p
         self.last_bar_time = now
@@ -59,7 +59,7 @@ class ScalpingLiveRunner:
                 self.current_price = tick_price
                 
             # Manage candlestick rollover
-            if (now - self.last_bar_time) >= 60.0:
+            if (now - self.last_bar_time) >= 60.0 or not self.bars:
                 self.last_bar_time = now
                 self.bars.append({
                     "open": self.current_price,
@@ -67,7 +67,7 @@ class ScalpingLiveRunner:
                     "low": self.current_price,
                     "close": self.current_price,
                     "volume": 1,
-                    "timestamp": datetime.fromtimestamp(now).strftime("%Y-%m-%d %H:%M:%S")
+                    "timestamp": datetime.fromtimestamp(now, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 })
                 if len(self.bars) > 300:
                     self.bars = self.bars[-300:]
@@ -120,7 +120,7 @@ class ScalpingLiveRunner:
                     self.balance += pnl
                     self.daily_pnl += pnl
                     pos["pnl"] = round(pnl, 2)
-                    pos["close_time"] = datetime.utcnow().isoformat() + "Z"
+                    pos["close_time"] = datetime.now(timezone.utc).isoformat()
                     pos["close_price"] = self.current_price
                     self.trades_history.append(pos)
                 else:
@@ -141,7 +141,7 @@ class ScalpingLiveRunner:
                     "lot": lot_size,
                     "tp": self.current_price + (tp_dist if sig == ScalpingSignal.BUY else -tp_dist),
                     "sl": self.current_price - (sl_dist if sig == ScalpingSignal.BUY else -sl_dist),
-                    "open_time": datetime.utcnow().isoformat() + "Z"
+                    "open_time": datetime.now(timezone.utc).isoformat()
                 }
                 self.robot.open_positions.append(order)
                 
@@ -164,7 +164,7 @@ class ScalpingLiveRunner:
                 "win_rate_pct": round(len([t for t in self.trades_history if t.get("pnl", 0) > 0]) / len(self.trades_history) * 100.0, 1) if self.trades_history else 0.0,
                 "last_signal": sig,
                 "spread_pips": spread,
-                "updated_at": datetime.utcnow().isoformat() + "Z"
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
             
             atomic_write_json(STATUS_FILE, status)

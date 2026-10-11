@@ -11,7 +11,7 @@ import datetime
 
 # Use the same Python interpreter that is running this script — no hardcoded paths
 PYTHON   = sys.executable
-BASE     = str(Path(__file__).resolve().parent) if False else os.path.dirname(os.path.abspath(__file__))
+BASE     = os.path.dirname(os.path.abspath(__file__))
 WATCHDOG = os.path.join(BASE, "watchdog_runner.py")
 LOG      = os.path.join(BASE, "supervisor.log")
 

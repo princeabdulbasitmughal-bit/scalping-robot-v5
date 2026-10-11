@@ -6,7 +6,7 @@ import random
 import math
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 RESULTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backtest_results.json')
 
@@ -95,7 +95,7 @@ def run_backtest(n_ticks=2000, sl_pips=30.0, tp_pips=45.0, lot=0.02, start_balan
             if closed:
                 balance += pnl
                 peak_balance = max(peak_balance, balance)
-                dd = (peak_balance - balance) / peak_balance * 100
+                dd = ((peak_balance - balance) / peak_balance * 100) if peak_balance > 0 else 0.0
                 max_drawdown = max(max_drawdown, dd)
                 trades.append({
                     'result': 'WIN' if pnl > 0 else 'LOSS',
@@ -117,7 +117,7 @@ def run_backtest(n_ticks=2000, sl_pips=30.0, tp_pips=45.0, lot=0.02, start_balan
         profit_factor = round(gross_wins / gross_losses, 2)
 
     results = {
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
         'n_ticks': n_ticks,
         'total_trades': len(trades),
         'wins': wins,
