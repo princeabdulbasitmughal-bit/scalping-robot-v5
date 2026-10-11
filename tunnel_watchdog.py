@@ -16,7 +16,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-BASE        = Path(r'E:\scalping-robot-v5')
+BASE        = Path(__file__).resolve().parent
 TUNNEL_OUT  = BASE / 'serveo_out.log'
 TUNNEL_ERR  = BASE / 'serveo_err.log'
 TUNNEL_URL  = BASE / 'tunnel_url.txt'
@@ -201,16 +201,16 @@ if __name__ == '__main__':
                 safe_kill(p)
                 safe_close(out)
                 safe_close(err)
+                current_url = None  # Clear stale URL — prevents false-alive on next check
                 time.sleep(2)
                 p, out, err = start_tunnel()
                 new_url = wait_for_url(15)
                 if new_url:
-                    if new_url != current_url:
-                        log(f'[ROTATION] NEW URL: {new_url}')
-                        current_url = new_url
-                    else:
-                        log(f'Reconnected URL: {new_url}')
+                    log(f'[ROTATION] NEW URL: {new_url}' if new_url != current_url else f'Reconnected URL: {new_url}')
+                    current_url = new_url
                     set_tunnel_url(new_url)
+                else:
+                    log('Reconnect attempted but URL not yet available — will retry next cycle')
             else:
                 new_url = extract_url()
                 if new_url:
