@@ -27,11 +27,13 @@ import argparse
 import subprocess
 from datetime import datetime
 from collections import defaultdict
+from pathlib import Path
 
-# Base paths
-REPO_DIR = r"E:\scalping-robot-v5"
+# Base paths — resolved relative to this file so no hardcoded drive letter is needed
+REPO_DIR = str(Path(__file__).resolve().parent)
 BACKUPS_DIR = os.path.join(REPO_DIR, "backups")
 LOG_FILE = os.path.join(REPO_DIR, "backup.log")
+_LOCK_FILE = os.path.join(REPO_DIR, "backup.lock")
 
 # Configuration
 BACKUP_INTERVAL_SECONDS = 30 * 60  # 30 minutes
@@ -56,6 +58,46 @@ logging.basicConfig(
     handlers=handlers
 )
 logger = logging.getLogger("AutoBackup")
+
+
+# ── Single-instance lock ──────────────────────────────────────────────────────
+def _acquire_instance_lock() -> bool:
+    """
+    Write our PID to backup.lock.  If the lock file already exists and the PID
+    inside is still running, return False (another daemon is alive).
+    Returns True when we successfully own the lock.
+    """
+    import psutil as _ps  # soft dependency — skip locking if psutil unavailable
+    try:
+        if os.path.exists(_LOCK_FILE):
+            try:
+                with open(_LOCK_FILE) as f:
+                    old_pid = int(f.read().strip())
+                if _ps.pid_exists(old_pid):
+                    return False          # other instance is alive
+            except Exception:
+                pass                      # stale / corrupt lock — overwrite it
+        with open(_LOCK_FILE, "w") as f:
+            f.write(str(os.getpid()))
+        return True
+    except ImportError:
+        # psutil not installed; skip duplicate-detection but still write PID
+        try:
+            with open(_LOCK_FILE, "w") as f:
+                f.write(str(os.getpid()))
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return True   # if we can't create the lock, proceed anyway
+
+
+def _release_instance_lock():
+    try:
+        if os.path.exists(_LOCK_FILE):
+            os.remove(_LOCK_FILE)
+    except Exception:
+        pass
 
 
 def ensure_backup_dir():
@@ -115,9 +157,12 @@ def cleanup_old_backups(backups_dir=BACKUPS_DIR, keep_last=MAX_BACKUPS_TO_KEEP):
 def run_git_sync(repo_dir=REPO_DIR, timestamp=""):
     """
     Run git sync operations:
-    1. git add -A
+    1. git add -A  (only stage tracked + new files from the backups dir,
+                    not the in-progress source files)
     2. git commit -m "Auto-backup {timestamp}"
     3. git push
+
+    Each step has a 30-second timeout and its returncode is checked.
     """
     try:
         logger.info(f"Starting Git synchronization for commit 'Auto-backup {timestamp}'...")
@@ -128,28 +173,37 @@ def run_git_sync(repo_dir=REPO_DIR, timestamp=""):
             ["git", "add", "-A"],
             cwd=repo_dir,
             capture_output=True,
-            text=True
+            text=True,
+            timeout=30,
         )
         logger.info(f"git add exit code: {res_add.returncode}")
         if res_add.stdout.strip():
             logger.info(f"git add stdout: {res_add.stdout.strip()}")
         if res_add.stderr.strip():
             logger.warning(f"git add stderr: {res_add.stderr.strip()}")
+        if res_add.returncode != 0:
+            logger.error(f"git add FAILED (rc={res_add.returncode}). Aborting git sync.")
+            return
 
-        # 2. git commit -m f"Auto-backup {timestamp}"
+        # 2. git commit
         commit_msg = f"Auto-backup {timestamp}"
         logger.info(f"Executing: git commit -m \"{commit_msg}\"")
         res_commit = subprocess.run(
             ["git", "commit", "-m", commit_msg],
             cwd=repo_dir,
             capture_output=True,
-            text=True
+            text=True,
+            timeout=30,
         )
         logger.info(f"git commit exit code: {res_commit.returncode}")
         if res_commit.stdout.strip():
             logger.info(f"git commit stdout: {res_commit.stdout.strip()}")
         if res_commit.stderr.strip():
             logger.warning(f"git commit stderr: {res_commit.stderr.strip()}")
+        # rc==1 means "nothing to commit" — that's OK, don't abort
+        if res_commit.returncode not in (0, 1):
+            logger.error(f"git commit FAILED (rc={res_commit.returncode}). Aborting git sync.")
+            return
 
         # 3. git push
         logger.info("Executing: git push")
@@ -157,17 +211,24 @@ def run_git_sync(repo_dir=REPO_DIR, timestamp=""):
             ["git", "push"],
             cwd=repo_dir,
             capture_output=True,
-            text=True
+            text=True,
+            timeout=30,
         )
         logger.info(f"git push exit code: {res_push.returncode}")
         if res_push.stdout.strip():
             logger.info(f"git push stdout: {res_push.stdout.strip()}")
         if res_push.stderr.strip():
             logger.warning(f"git push stderr: {res_push.stderr.strip()}")
+        if res_push.returncode != 0:
+            logger.error(f"git push FAILED (rc={res_push.returncode}): {res_push.stderr.strip()}")
+            return
 
         logger.info("Git synchronization completed successfully.")
+    except subprocess.TimeoutExpired as e:
+        logger.error(f"Git command timed out after 30 s: {e}")
     except Exception as e:
         logger.error(f"Error during git sync: {e}", exc_info=True)
+
 
 
 def perform_backup_cycle(cycle_count):
@@ -188,11 +249,22 @@ def perform_backup_cycle(cycle_count):
                 dst_name = f"{stem}_{timestamp}{ext}"
                 dst_path = os.path.join(BACKUPS_DIR, dst_name)
 
-                shutil.copy2(src_path, dst_path)
+                # Copy to .tmp first then atomic-replace to avoid reading a
+                # half-written file when mt5_live_trader uses os.replace.
+                tmp_path = dst_path + ".tmp"
+                shutil.copy2(src_path, tmp_path)
+                os.replace(tmp_path, dst_path)
                 size_kb = os.path.getsize(dst_path) / 1024.0
                 logger.info(f"Successfully copied: {rel_path} -> backups\\{dst_name} ({size_kb:.2f} KB)")
                 copied_count += 1
             except Exception as e:
+                # Clean up orphaned .tmp if anything went wrong
+                try:
+                    tmp_candidate = os.path.join(BACKUPS_DIR, dst_name + ".tmp") if "dst_name" in dir() else None  # type: ignore[name-defined]
+                    if tmp_candidate and os.path.exists(tmp_candidate):
+                        os.remove(tmp_candidate)
+                except Exception:
+                    pass
                 logger.error(f"Error copying {rel_path}: {e}", exc_info=True)
         else:
             logger.info(f"File skipped (not found): {rel_path}")
@@ -218,6 +290,13 @@ def main():
     parser.add_argument("--once", action="store_true", help="Run a single backup cycle and exit immediately (useful for testing)")
     args = parser.parse_args()
 
+    # ── Single-instance guard ─────────────────────────────────────────────────
+    if not _acquire_instance_lock():
+        logger.error(
+            f"Another auto_backup daemon is already running (see {_LOCK_FILE}). Exiting."
+        )
+        sys.exit(1)
+
     logger.info("Auto-Backup & Git Sync Daemon initializing...")
     logger.info(f"Target repository: {REPO_DIR}")
     logger.info(f"Backups directory: {BACKUPS_DIR}")
@@ -227,33 +306,36 @@ def main():
 
     cycle_count = 1
 
-    if args.once:
-        logger.info("Running in single-execution mode (--once)...")
-        try:
-            perform_backup_cycle(cycle_count)
-        except Exception as e:
-            logger.error(f"Fatal error in single backup cycle: {e}", exc_info=True)
-            sys.exit(1)
-        logger.info("Single backup cycle finished successfully.")
-        return
+    try:
+        if args.once:
+            logger.info("Running in single-execution mode (--once)...")
+            try:
+                perform_backup_cycle(cycle_count)
+            except Exception as e:
+                logger.error(f"Fatal error in single backup cycle: {e}", exc_info=True)
+                sys.exit(1)
+            logger.info("Single backup cycle finished successfully.")
+            return
 
-    logger.info("Entering continuous backup loop...")
-    while True:
-        try:
-            perform_backup_cycle(cycle_count)
-        except KeyboardInterrupt:
-            logger.info("Auto-backup daemon interrupted by user (KeyboardInterrupt). Exiting.")
-            break
-        except Exception as e:
-            logger.error(f"Unhandled exception in backup cycle #{cycle_count}: {e}", exc_info=True)
+        logger.info("Entering continuous backup loop...")
+        while True:
+            try:
+                perform_backup_cycle(cycle_count)
+            except KeyboardInterrupt:
+                logger.info("Auto-backup daemon interrupted by user (KeyboardInterrupt). Exiting.")
+                break
+            except Exception as e:
+                logger.error(f"Unhandled exception in backup cycle #{cycle_count}: {e}", exc_info=True)
 
-        cycle_count += 1
-        logger.info(f"Sleeping for {BACKUP_INTERVAL_SECONDS} seconds ({BACKUP_INTERVAL_SECONDS / 60:.0f} minutes)...")
-        try:
-            time.sleep(BACKUP_INTERVAL_SECONDS)
-        except KeyboardInterrupt:
-            logger.info("Auto-backup daemon interrupted during sleep. Exiting.")
-            break
+            cycle_count += 1
+            logger.info(f"Sleeping for {BACKUP_INTERVAL_SECONDS} seconds ({BACKUP_INTERVAL_SECONDS / 60:.0f} minutes)...")
+            try:
+                time.sleep(BACKUP_INTERVAL_SECONDS)
+            except KeyboardInterrupt:
+                logger.info("Auto-backup daemon interrupted during sleep. Exiting.")
+                break
+    finally:
+        _release_instance_lock()
 
 
 if __name__ == "__main__":

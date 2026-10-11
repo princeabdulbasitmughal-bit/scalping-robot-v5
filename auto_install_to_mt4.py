@@ -37,27 +37,49 @@ def find_mt4_directories():
 def install_to_target(target_dir):
     mql4_experts = os.path.join(target_dir, "MQL4", "Experts")
     mql4_presets = os.path.join(target_dir, "MQL4", "Presets")
-    os.makedirs(mql4_experts, exist_ok=True)
-    os.makedirs(mql4_presets, exist_ok=True)
-    
+    try:
+        os.makedirs(mql4_experts, exist_ok=True)
+        os.makedirs(mql4_presets, exist_ok=True)
+    except PermissionError as e:
+        print(f"  [ERROR] Cannot create directories in {target_dir}: {e}")
+        print("  Try running this script as Administrator.")
+        return []
+
     installed_files = []
+    errors = []
+
     if os.path.exists(EXPERTS_SRC):
         for f in os.listdir(EXPERTS_SRC):
-            if f.endswith(".ex4") or f.endswith(".mq4"):
+            # Case-insensitive extension check
+            if f.lower().endswith(".ex4") or f.lower().endswith(".mq4"):
                 src = os.path.join(EXPERTS_SRC, f)
                 dst = os.path.join(mql4_experts, f)
-                shutil.copy2(src, dst)
-                installed_files.append(f"EA: {f}")
-                
+                try:
+                    shutil.copy2(src, dst)
+                    installed_files.append(f"EA: {f}")
+                except PermissionError as e:
+                    errors.append(f"  [ERROR] Cannot copy {f} -> Experts (permission denied): {e}")
+                except Exception as e:
+                    errors.append(f"  [ERROR] Failed to copy {f} -> Experts: {e}")
+
     if os.path.exists(PRESETS_SRC):
         for f in os.listdir(PRESETS_SRC):
-            if f.endswith(".set"):
+            if f.lower().endswith(".set"):
                 src = os.path.join(PRESETS_SRC, f)
                 dst = os.path.join(mql4_presets, f)
-                shutil.copy2(src, dst)
-                installed_files.append(f"Preset: {f}")
-                
+                try:
+                    shutil.copy2(src, dst)
+                    installed_files.append(f"Preset: {f}")
+                except PermissionError as e:
+                    errors.append(f"  [ERROR] Cannot copy {f} -> Presets (permission denied): {e}")
+                except Exception as e:
+                    errors.append(f"  [ERROR] Failed to copy {f} -> Presets: {e}")
+
+    for err in errors:
+        print(err)
+
     return installed_files
+
 
 def main():
     print("="*70)

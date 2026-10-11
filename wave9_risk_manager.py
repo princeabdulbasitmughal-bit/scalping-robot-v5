@@ -167,7 +167,10 @@ class RiskManager:
         return {"allowed": True, "reason": "OK", "lot_scale": lot_scale}
 
     # ── Persist risk state ────────────────────────────────────────────────────
-    def save_state(self, path: str = r"E:\scalping-robot-v5\risk_state.json"):
+    def save_state(self, path: str = None):
+        if path is None:
+            import pathlib
+            path = str(pathlib.Path(__file__).resolve().parent / "risk_state.json")
         try:
             state = {
                 "peak_balance": self.peak_balance,
@@ -181,7 +184,10 @@ class RiskManager:
         except Exception:
             pass
 
-    def load_state(self, path: str = r"E:\scalping-robot-v5\risk_state.json"):
+    def load_state(self, path: str = None):
+        if path is None:
+            import pathlib
+            path = str(pathlib.Path(__file__).resolve().parent / "risk_state.json")
         try:
             if os.path.exists(path):
                 with open(path) as f:

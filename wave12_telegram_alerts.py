@@ -14,8 +14,9 @@ from datetime import datetime
 from typing import Optional
 
 
-TELEGRAM_CONFIG_PATH = r"E:\scalping-robot-v5\telegram_config.json"
-TELEGRAM_LOG_PATH = r"E:\scalping-robot-v5\telegram.log"
+_BASE_DIR = __import__("pathlib").Path(__file__).resolve().parent
+TELEGRAM_CONFIG_PATH = str(_BASE_DIR / "telegram_config.json")
+TELEGRAM_LOG_PATH = str(_BASE_DIR / "telegram.log")
 
 # Default config template (edit to enable)
 DEFAULT_CONFIG = {

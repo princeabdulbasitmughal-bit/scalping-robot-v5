@@ -16,8 +16,7 @@ try:
 except ImportError:
     psutil = None
 
-_WINDOWS_BASE = Path(r'E:\scalping-robot-v5')
-BASE         = _WINDOWS_BASE if sys.platform == 'win32' and _WINDOWS_BASE.exists() else Path(__file__).resolve().parent
+BASE         = Path(__file__).resolve().parent
 STATUS_FILE  = BASE / 'live_status.json'
 TRADER_OUT   = BASE / 'trader_out.log'
 TRADER_ERR   = BASE / 'trader_err.log'
