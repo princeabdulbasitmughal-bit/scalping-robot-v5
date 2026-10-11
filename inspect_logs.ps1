@@ -1,4 +1,4 @@
-$base = 'E:\scalping-robot-v5'
+$base = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
 
 Write-Host '--- trader_err.log (last 20) ---'
 Get-Content "$base\trader_err.log" -Tail 20 -ErrorAction SilentlyContinue

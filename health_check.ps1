@@ -4,8 +4,10 @@ try { $r = Invoke-WebRequest -Uri 'http://localhost:5050/api/health' -TimeoutSec
 try { $r = Invoke-WebRequest -Uri 'http://localhost:8899/health' -TimeoutSec 3 -UseBasicParsing; $h8 = $r.StatusCode } catch {}
 Write-Host "5050=$h5 | 8899=$h8"
 
+$base = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
+
 Write-Host "--- Watchdog log tail ---"
-Get-Content 'E:\scalping-robot-v5\watchdog_out.log' -Tail 10 -ErrorAction SilentlyContinue
+Get-Content (Join-Path $base 'watchdog_out.log') -Tail 10 -ErrorAction SilentlyContinue
 
 Write-Host "--- Python PIDs ---"
 $procs = Get-WmiObject Win32_Process -Filter "Name='python.exe'"
@@ -15,7 +17,7 @@ foreach ($p in $procs) {
 
 Write-Host "--- MT5 status ---"
 try {
-    $raw = Get-Content 'E:\scalping-robot-v5\live_status.json' -Raw -ErrorAction SilentlyContinue
+    $raw = Get-Content (Join-Path $base 'live_status.json') -Raw -ErrorAction SilentlyContinue
     if ($raw) {
         $s = $raw | ConvertFrom-Json
         $net = [math]::Round($s.balance - 10000, 2)

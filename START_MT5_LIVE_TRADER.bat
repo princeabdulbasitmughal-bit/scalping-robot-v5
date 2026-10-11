@@ -1,7 +1,7 @@
 @echo off
 title SCALPING ROBOT V5 PRO - METATRADER 5 LIVE TRADER
 color 0A
-cd /d "E:\scalping-robot-v5"
+cd /d "%~dp0"
 
 echo ==============================================================================
 echo   SCALPING ROBOT V5 PRO - METATRADER 5 LIVE TRADING ENGINE

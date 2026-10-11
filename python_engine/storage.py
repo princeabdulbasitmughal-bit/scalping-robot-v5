@@ -56,6 +56,20 @@ def atomic_write_json(
                     shutil.copy2(path, bak_path)
                 except Exception as bak_err:
                     logger.debug(f"[STORAGE] Failed to update .bak for {path}: {bak_err}")
+
+                # Clean up any stale temp files (>60s) left from abrupt process crashes
+                try:
+                    now_ts = time.time()
+                    for stale in dir_path.glob(f"{path.name}.tmp.*"):
+                        if stale != temp_path:
+                            try:
+                                if (now_ts - stale.stat().st_mtime) > 60:
+                                    stale.unlink(missing_ok=True)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
                 return True
             except (PermissionError, OSError) as err:
                 last_err = err
