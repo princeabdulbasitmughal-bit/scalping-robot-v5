@@ -1,39 +1,38 @@
 ================================================================================
                    SCALPING ROBOT V5 - PERFORMANCE REPORT                   
 ================================================================================
-Report Generated At : 2026-10-04 08:20:39
-Status Updated At   : 2026-10-04T03:20:39.007481Z
+Report Generated At : 2026-10-12 00:59:30
+Status Updated At   : 2026-10-11T19:59:30.340971Z
 Robot Status        : ACTIVE_SCALPING
-Account Mode        : DEMO_ACCOUNT
-Account ID          : DEMO-889901-MT5
-Broker              : MetaQuotes-Demo / Institutional Liquidity
+Account Mode        : SIMULATION
+Account ID          : None
+Broker              : None
 Active Symbol       : XAUUSD
-Current Price       : 2387.05
+Current Price       : 2400.08
 --------------------------------------------------------------------------------
                             PERFORMANCE & GRADING                           
 --------------------------------------------------------------------------------
-Performance Grade   : A+
-Win Rate            : 90.50%
-Daily PnL           : $279.80
-Total Trades        : 42
-Balance             : $10337.20
-Equity              : $10290.00
-Free Margin         : $10290.00
+Performance Grade   : C
+Win Rate            : 25.00%
+Daily PnL           : $0.00
+Total Trades        : 4
+Balance             : $9790.00
+Equity              : $9790.00
+Free Margin         : $9790.00
 --------------------------------------------------------------------------------
                                 ACTIVE ALERTS                               
 --------------------------------------------------------------------------------
-  [OK] No active alerts. All performance parameters within normal limits.
+  [!] ALERT: Win rate below 75% (Current: 25.00%)
 --------------------------------------------------------------------------------
-                           OPEN POSITIONS (2)                          
+                           OPEN POSITIONS (0)                          
 --------------------------------------------------------------------------------
-  1. [XAUUSD] BUY  | Lots: 0.03 | Entry: 2387.09 | SL: 2381.59 | TP: 2390.09 | ID: trade-1791081834468
-  2. [XAUUSD] SELL | Lots: 0.04 | Entry: 2385.9 | SL: 2391.4 | TP: 2382.9 | ID: trade-1791083483774
+  No open positions at this time.
 --------------------------------------------------------------------------------
                             SYSTEM & LATENCY                                
 --------------------------------------------------------------------------------
-Tick to Signal Latency  : 78.0 us
-Signal to Dispatch Latency: 1710.7 us
+Tick to Signal Latency  : 55.2 us
+Signal to Dispatch Latency: 1263.9 us
 Order Execution Latency : 0.0 ms
 Dynamic Slippage Points : 14
-Ticks Processed         : 33682
+Ticks Processed         : 631790
 ================================================================================
