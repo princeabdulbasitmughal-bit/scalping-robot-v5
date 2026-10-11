@@ -15,8 +15,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Tuple
 
 # Base Directories and Paths
-_WINDOWS_BASE_DIR = Path(r"E:\scalping-robot-v5")
-BASE_DIR = _WINDOWS_BASE_DIR if os.name == "nt" and _WINDOWS_BASE_DIR.exists() else Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent
 STATUS_FILE = BASE_DIR / "live_status.json"
 ALERTS_LOG_FILE = BASE_DIR / "alerts.log"
 ALERT_STATUS_FILE = BASE_DIR / "alert_status.json"
