@@ -1638,7 +1638,7 @@ class MT5LiveTrader:
                     self.trading_halted = True
                     resume_at = now_epoch + 3600.0          # exactly 1 hour
                     self._cb_pause_until = resume_at
-                    resume_str = datetime.utcfromtimestamp(resume_at).strftime("%Y-%m-%d %H:%M:%S UTC")
+                    resume_str = datetime.fromtimestamp(resume_at, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                     cb_msg = (
                         f"CIRCUIT BREAKER ACTIVATED | Daily loss: ${self.daily_loss:,.2f} "
                         f"(PnL: ${self.daily_pnl:+,.2f}) >= max_daily_loss_usd ${max_daily_loss:,.2f}. "
@@ -1674,7 +1674,7 @@ class MT5LiveTrader:
                 if self._cooling_down_until <= now_epoch:
                     self._cooling_down_until = now_epoch + 1800.0  # 30 minutes (1800s)
                     self.trading_halted = True
-                    pause_time_str = datetime.utcfromtimestamp(self._cooling_down_until).strftime("%Y-%m-%d %H:%M:%S UTC")
+                    pause_time_str = datetime.fromtimestamp(self._cooling_down_until, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                     pause_msg = f"COOLING DOWN: 3 consecutive losses | Pausing trading for 30 minutes until {pause_time_str}."
                     logger.warning(pause_msg)
                     sys.stdout.write(f"[{pause_msg}]\n")
