@@ -124,7 +124,7 @@ def evaluate_and_report() -> bool:
 
     # Check alert conditions
     # Requirement 5: Alert if win_rate < 75: log 'ALERT: Win rate below 75%'
-    if win_rate < 75.0:
+    if total_trades > 0 and win_rate < 75.0:
         alert_msg = "ALERT: Win rate below 75%"
         logger.warning(alert_msg)
         alerts.append(f"{alert_msg} (Current: {win_rate:.2f}%)")
