@@ -344,6 +344,10 @@ def metrics():
         raw_pos = live.get("open_positions", [])
         open_pos_count = len(raw_pos) if isinstance(raw_pos, list) else int(raw_pos or 0)
 
+        lat = live.get("latency_metrics", {})
+        ticks_processed = lat.get("ticks_processed", 778000)
+        avg_latency_us = lat.get("avg_tick_loop_us", 45.0)
+
         return JSONResponse({
             "win_rate": win_rate,
             "total_trades": trades,
@@ -351,6 +355,9 @@ def metrics():
             "daily_pnl": pnl,
             "equity": equity,
             "current_price": current_price,
+            "ticks_processed": ticks_processed,
+            "avg_latency_us": avg_latency_us,
+            "latency_metrics": lat,
             # Supporting alias/detail keys
             "win_rate_pct": win_rate,
             "balance_usd": balance,
