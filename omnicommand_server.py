@@ -5,6 +5,7 @@ Serves live_status.json and system health metrics with CORS and robust error han
 """
 import json
 import os
+import secrets
 import signal
 import subprocess
 import sys
@@ -14,7 +15,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 try:
-    from fastapi import FastAPI, Request
+    from fastapi import FastAPI, Request, HTTPException, Security
+    from fastapi.security import APIKeyHeader
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse, HTMLResponse
     from fastapi.exceptions import RequestValidationError
@@ -86,10 +88,42 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Request logging & CORS header enforcement middleware
+# API Key Authentication
+# Set OMNICOMMAND_API_KEY env var to a strong secret.
+# If the env var is not set the server starts in OPEN mode (safe only on
+# localhost). Destructive endpoints always require the key when it is set.
+# ---------------------------------------------------------------------------
+_API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+_CONFIGURED_API_KEY: str = os.getenv("OMNICOMMAND_API_KEY", "")
+
+
+def _require_api_key(api_key: str = Security(_API_KEY_HEADER)) -> None:
+    """FastAPI dependency — raises 403 if the configured key is present but not matched."""
+    if not _CONFIGURED_API_KEY:
+        return  # No key configured: open mode (localhost-only deployment)
+    if not api_key or not secrets.compare_digest(api_key, _CONFIGURED_API_KEY):
+        raise HTTPException(status_code=403, detail="Invalid or missing API key")
+
+
+# ---------------------------------------------------------------------------
+# Body size limit middleware (1 MB)
+# ---------------------------------------------------------------------------
+_MAX_BODY_BYTES = 1 * 1024 * 1024  # 1 MB
+
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > _MAX_BODY_BYTES:
+        return JSONResponse({"error": "Request body too large (max 1 MB)"}, status_code=413)
+    return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
+# Request logging middleware
 # ---------------------------------------------------------------------------
 @app.middleware("http")
-async def log_requests_and_set_cors(request: Request, call_next):
+async def log_requests(request: Request, call_next):
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     client_ip = request.client.host if request.client else "unknown"
     log.info("[%s] %s %s from %s", ts, request.method, request.url.path, client_ip)
@@ -99,15 +133,10 @@ async def log_requests_and_set_cors(request: Request, call_next):
     except Exception as exc:
         elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
         log.error("[%s] ERROR %s %s - %s (took %.2fms)", ts, request.method, request.url.path, exc, elapsed_ms)
-        return JSONResponse(
-            {"error": str(exc)},
-            status_code=500,
-            headers={"Access-Control-Allow-Origin": "*"}
-        )
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
     elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
     log.info("[%s] %s %s -> %d (took %.2fms)", ts, request.method, request.url.path, response.status_code, elapsed_ms)
-    response.headers["Access-Control-Allow-Origin"] = "*"
     return response
 
 # ---------------------------------------------------------------------------
@@ -119,7 +148,6 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse(
         {"error": detail, "status_code": exc.status_code},
         status_code=exc.status_code,
-        headers={"Access-Control-Allow-Origin": "*"}
     )
 
 @app.exception_handler(RequestValidationError)
@@ -127,17 +155,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(
         {"error": f"Validation error: {exc}", "detail": str(exc)},
         status_code=422,
-        headers={"Access-Control-Allow-Origin": "*"}
     )
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     log.exception("Unhandled exception on %s %s", request.method, request.url.path)
-    return JSONResponse(
-        {"error": str(exc)},
-        status_code=500,
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return JSONResponse({"error": str(exc)}, status_code=500)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -194,42 +217,41 @@ def read_live_status() -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 @app.get("/dashboard", response_class=HTMLResponse)
-async def serve_dashboard():
+def serve_dashboard():
     try:
         dash_path = BASE_DIR / "dashboard.html"
         if dash_path.exists():
             return HTMLResponse(content=dash_path.read_text(encoding="utf-8"))
         return HTMLResponse(content="<h1>OmniCommand Pro Trading Server is Active</h1>")
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/performance", response_class=HTMLResponse)
 @app.get("/performance-dashboard", response_class=HTMLResponse)
-async def serve_performance_dashboard():
+def serve_performance_dashboard():
     try:
         dash_path = BASE_DIR / "performance_dashboard.html"
         if dash_path.exists():
             return HTMLResponse(content=dash_path.read_text(encoding="utf-8"))
         return HTMLResponse(content="<h1>Performance Dashboard is Active</h1>")
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/ping")
-async def ping():
+def ping():
     """Liveness probe."""
     try:
         return JSONResponse(
             {"pong": True, "ts": time.time(), "status": "ok"},
-            headers={"Access-Control-Allow-Origin": "*"}
         )
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/health")
-async def health():
+def health():
     """Returns current live_status.json data plus server uptime / staleness check."""
     try:
         uptime = round(time.time() - START_TIME, 1)
@@ -292,24 +314,24 @@ async def health():
             "trades": recent_trades,
             "latency_metrics": live.get("latency_metrics", {}),
             "updated_at": live.get("updated_at", ""),
-        }, headers={"Access-Control-Allow-Origin": "*"})
+        })
     except Exception as exc:
         log.error("health error: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/status")
-async def status():
+def status():
     """Full raw live_status.json payload."""
     try:
-        return JSONResponse(read_live_status(), headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse(read_live_status())
     except Exception as exc:
         log.error("status error: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/metrics")
-async def metrics():
+def metrics():
     """Key performance metrics: win_rate, total_trades, balance, daily_pnl, equity, current_price."""
     try:
         live = read_live_status()
@@ -338,14 +360,14 @@ async def metrics():
             "open_positions": open_pos_count,
             "risk_status": "SAFE" if equity > 9500 else "WARNING" if equity > 9000 else "CRITICAL",
             "updated_at": live.get("updated_at", ""),
-        }, headers={"Access-Control-Allow-Origin": "*"})
+        })
     except Exception as exc:
         log.error("metrics error: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/positions")
-async def positions():
+def positions():
     """Return open positions list from live_status.json."""
     try:
         live = read_live_status()
@@ -358,14 +380,14 @@ async def positions():
             "count": open_pos_count,
             "ok": True,
             "updated_at": live.get("updated_at", ""),
-        }, headers={"Access-Control-Allow-Origin": "*"})
+        })
     except Exception as exc:
         log.error("positions error: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/history")
-async def trade_history():
+def trade_history():
     """Return recent trade history from live_status.json."""
     try:
         live = read_live_status()
@@ -398,14 +420,14 @@ async def trade_history():
             "mt5_connected": live.get("mt5_connected", False),
             "latency_metrics": live.get("latency_metrics", {}),
             "updated_at": live.get("updated_at", ""),
-        }, headers={"Access-Control-Allow-Origin": "*"})
+        })
     except Exception as exc:
         log.error("history error: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/analytics")
-async def analytics():
+def analytics():
     """Return analytics metrics and real-time equity curve (last 50 balance values) for dashboard."""
     try:
         live = read_live_status()
@@ -426,10 +448,16 @@ async def analytics():
         try:
             trader_log_path = BASE_DIR / "trader.log"
             if trader_log_path.exists():
-                lines = trader_log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-                import re
-                for line in reversed(lines[-60:]):
-                    match = re.search(r"TIER\s*([1-5])|T([1-5])-", line, re.IGNORECASE)
+                import re as _re
+                # Read only the last 64 KB to avoid OOM on large log files
+                _TAIL_BYTES = 65536
+                with open(trader_log_path, "rb") as _lf:
+                    _lf.seek(0, 2)
+                    _file_size = _lf.tell()
+                    _lf.seek(max(0, _file_size - _TAIL_BYTES))
+                    _tail = _lf.read().decode("utf-8", errors="ignore")
+                for line in reversed(_tail.splitlines()[-60:]):
+                    match = _re.search(r"TIER\s*([1-5])|T([1-5])-", line, _re.IGNORECASE)
                     if match:
                         t = match.group(1) or match.group(2)
                         tier_num = int(t)
@@ -475,15 +503,15 @@ async def analytics():
             "max_consecutive_losses": analytics_data.get("max_consecutive_losses", 2),
             "total_trades": live.get("total_trades", analytics_data.get("total_trades", 10)),
             "updated_at": live.get("updated_at", datetime.now(timezone.utc).isoformat()),
-        }, headers={"Access-Control-Allow-Origin": "*"})
+        })
     except Exception as exc:
         log.error("analytics error: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 
 @app.api_route("/trader/restart", methods=["POST"])
-async def restart_trader():
+def restart_trader(_auth: None = Security(_require_api_key)):
     """Manually trigger trader restart via watchdog signal file and reset."""
     try:
         signal_file = BASE_DIR / "restart_signal.txt"
@@ -518,14 +546,19 @@ async def restart_trader():
 
         if trader_pid:
             try:
-                if sys.platform == "win32":
-                    subprocess.run(
-                        ["taskkill", "/PID", str(trader_pid), "/F"],
-                        capture_output=True, timeout=5
-                    )
+                target_pid = int(trader_pid)
+                # Guard: never kill PID ≤4 (system) or our own process
+                if target_pid > 4 and target_pid != os.getpid():
+                    if sys.platform == "win32":
+                        subprocess.run(
+                            ["taskkill", "/PID", str(target_pid), "/F"],
+                            capture_output=True, timeout=5
+                        )
+                    else:
+                        os.kill(target_pid, signal.SIGTERM)
+                    log.info("Killed trader PID %s for restart", target_pid)
                 else:
-                    os.kill(int(trader_pid), signal.SIGTERM)
-                log.info("Killed trader PID %s for restart", trader_pid)
+                    log.warning("Refusing to kill PID %s (self or system PID)", target_pid)
             except Exception as kill_exc:
                 log.warning("Could not terminate PID %s for restart: %s", trader_pid, kill_exc)
 
@@ -533,14 +566,14 @@ async def restart_trader():
             "ok": True,
             "message": "Restart signal sent",
             "ts": time.time(),
-        }, headers={"Access-Control-Allow-Origin": "*"})
+        })
     except Exception as exc:
         log.error("Failed to write restart signal: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.api_route("/trader/stop", methods=["POST"])
-async def stop_trader():
+def stop_trader(_auth: None = Security(_require_api_key)):
     """Gracefully stop the trader process by writing a stop signal file and terminating trader PID."""
     try:
         stop_file = BASE_DIR / "stop_signal.txt"
@@ -576,26 +609,32 @@ async def stop_trader():
 
         if trader_pid:
             try:
-                if sys.platform == "win32":
-                    subprocess.run(
-                        ["taskkill", "/PID", str(trader_pid), "/F"],
-                        capture_output=True, timeout=5
-                    )
+                target_pid = int(trader_pid)
+                # Guard: never kill PID ≤4 (system) or our own process
+                if target_pid > 4 and target_pid != os.getpid():
+                    if sys.platform == "win32":
+                        subprocess.run(
+                            ["taskkill", "/PID", str(target_pid), "/F"],
+                            capture_output=True, timeout=5
+                        )
+                    else:
+                        os.kill(target_pid, signal.SIGTERM)
+                    killed = True
+                    log.info("Terminated trader PID %s", target_pid)
                 else:
-                    os.kill(int(trader_pid), signal.SIGTERM)
-                killed = True
-                log.info("Terminated trader PID %s", trader_pid)
+                    log.warning("Refusing to kill PID %s (self or system PID)", target_pid)
             except Exception as kill_exc:
                 log.warning("Could not terminate PID %s: %s", trader_pid, kill_exc)
 
-        # Update status in live_status.json
+        # Update status in live_status.json — atomically to avoid corrupt reads
         try:
-            if STATUS_FILE.exists():
-                live["status"] = "STOPPED"
-                live["updated_at"] = datetime.now(timezone.utc).isoformat()
-                STATUS_FILE.write_text(json.dumps(live, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+            live["status"] = "STOPPED"
+            live["updated_at"] = datetime.now(timezone.utc).isoformat()
+            _tmp = STATUS_FILE.with_suffix(".tmp_stop")
+            _tmp.write_bytes(json.dumps(live, indent=2, default=str).encode("utf-8"))
+            os.replace(_tmp, STATUS_FILE)
+        except Exception as write_exc:
+            log.warning("stop_trader: could not update status file: %s", write_exc)
 
         return JSONResponse({
             "ok": True,
@@ -603,20 +642,20 @@ async def stop_trader():
             "pid_killed": killed,
             "trader_pid": trader_pid,
             "ts": time.time(),
-        }, headers={"Access-Control-Allow-Origin": "*"})
+        })
     except Exception as exc:
         log.error("Failed to stop trader: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/system")
-async def system_health():
+def system_health():
     """Full system health: RAM, CPU, disk, all services."""
     try:
         import psutil
         mem = psutil.virtual_memory()
         cpu = psutil.cpu_percent(interval=None)
-        disk_path = "E:\\" if os.path.exists("E:\\") else "."
+        disk_path = str(BASE_DIR.anchor)
         disk = psutil.disk_usage(disk_path)
         live = read_live_status()
         return JSONResponse({
@@ -630,19 +669,19 @@ async def system_health():
             "balance": live.get("balance", 0.0),
             "current_price": live.get("current_price", 0.0),
             "uptime_sec": round(time.time() - START_TIME, 1),
-        }, headers={"Access-Control-Allow-Origin": "*"})
+        })
     except ImportError:
-        return JSONResponse({"error": "psutil not installed"}, status_code=501, headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": "psutil not installed"}, status_code=501)
     except Exception as exc:
         log.error("system_health error: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
 # Manual daily PnL / circuit-breaker reset endpoint
 # ---------------------------------------------------------------------------
 @app.post("/api/reset-daily-pnl")
-async def reset_daily_pnl():
+def reset_daily_pnl(_auth: None = Security(_require_api_key)):
     """
     Manually reset the daily PnL counters and clear the circuit breaker so
     trading resumes immediately without waiting for midnight UTC rollover.
@@ -687,7 +726,6 @@ async def reset_daily_pnl():
             return JSONResponse(
                 {"success": False, "error": f"Could not write status file: {write_exc}"},
                 status_code=500,
-                headers={"Access-Control-Allow-Origin": "*"},
             )
 
         # 4. Invalidate in-memory TTL cache so next /status read picks up the reset
@@ -707,14 +745,12 @@ async def reset_daily_pnl():
                 "trading_halted": False,
                 "reset_at": live["updated_at"],
             },
-            headers={"Access-Control-Allow-Origin": "*"},
         )
     except Exception as exc:
         log.exception("reset-daily-pnl: unexpected error: %s", exc)
         return JSONResponse(
             {"success": False, "error": str(exc)},
             status_code=500,
-            headers={"Access-Control-Allow-Origin": "*"},
         )
 
 
@@ -722,33 +758,24 @@ async def reset_daily_pnl():
 # Wave 15: ML Status endpoint + Dashboard v2 serve
 # ---------------------------------------------------------------------------
 @app.get("/ml_status")
-async def ml_status():
+def ml_status():
     """Return last ML predictor result from live_status.json."""
     try:
-        import json as _j
-        status_path = os.path.join(str(BASE_DIR), "live_status.json")
-        if not os.path.exists(status_path):
-            return JSONResponse({"error": "live_status.json not found"}, status_code=404,
-                                headers={"Access-Control-Allow-Origin": "*"})
-        with open(status_path, encoding="utf-8") as f:
-            data = _j.load(f)
+        data = read_live_status()
         ml = data.get("ml_prediction") or data.get("ml") or {}
-        return JSONResponse({"ml": ml, "ts": data.get("ts", "")},
-                            headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"ml": ml, "ts": data.get("ts", "")})
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500,
-                            headers={"Access-Control-Allow-Origin": "*"})
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/dashboard_v2", response_class=HTMLResponse)
 @app.get("/dash2", response_class=HTMLResponse)
-async def serve_dashboard_v2():
+def serve_dashboard_v2():
     """Serve Wave 15 Chart.js advanced dashboard."""
     try:
-        p = os.path.join(str(BASE_DIR), "dashboard_v2.html")
-        if os.path.exists(p):
-            with open(p, encoding="utf-8") as f:
-                return HTMLResponse(f.read())
+        p = BASE_DIR / "dashboard_v2.html"
+        if p.exists():
+            return HTMLResponse(p.read_text(encoding="utf-8"))
         return HTMLResponse("<h1>dashboard_v2.html not found</h1>", status_code=404)
     except Exception as exc:  # noqa: F841
         return HTMLResponse("<h1>Internal Server Error</h1>", status_code=500)
