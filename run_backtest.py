@@ -29,9 +29,11 @@ def simulate_price(n_ticks=2000, start_price=2400.0):
 
 
 def bb_signal(prices, i, period=20):
-    if i < period:
+    if period <= 0 or not prices or i < period or i >= len(prices):
         return 'HOLD'
     window = prices[i - period:i]
+    if not window:
+        return 'HOLD'
     mean = sum(window) / len(window)
     variance = sum((x - mean) ** 2 for x in window) / len(window)
     std = math.sqrt(variance)
@@ -143,8 +145,10 @@ def run_backtest(n_ticks=2000, sl_pips=30.0, tp_pips=45.0, lot=0.02, start_balan
     print("=" * 50)
 
     try:
-        with open(RESULTS_FILE, 'w', encoding='utf-8') as f:
+        tmp_file = f"{RESULTS_FILE}.tmp.{os.getpid()}"
+        with open(tmp_file, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2)
+        os.replace(tmp_file, RESULTS_FILE)
         print("Results saved to backtest_results.json")
     except Exception as e:
         print("Could not save results: {}".format(e))

@@ -12,6 +12,8 @@ Spread threshold table (pips):
 """
 
 import logging
+import math
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -37,6 +39,7 @@ class SpreadOptimizer:
     """
 
     def __init__(self):
+        self._lock = threading.Lock()
         self._rejected_count: int = 0
         self._accepted_count: int = 0
         self._last_spread: float = 0.0
@@ -72,58 +75,64 @@ class SpreadOptimizer:
             session_name : optional session name from wave10 session optimizer
             vol_index    : current session volatility index (from wave10)
         """
-        self._last_spread = spread_pips
+        if spread_pips is None or math.isnan(spread_pips) or math.isinf(spread_pips) or spread_pips < 0:
+            return False, f"SPREAD REJECT: invalid spread value ({spread_pips})"
 
-        # Resolve session
-        session = (session_name or self._detect_session()).upper()
-        # Normalize common variations
-        session = session.replace("NEW YORK", "NEW_YORK").replace("LDN/NY", "LDN_NY")
-        if "LONDON" in session and "NY" in session:
-            session = "LDN_NY"
-        elif "NEW" in session or "YORK" in session:
-            session = "NEW_YORK"
-        elif "LONDON" in session:
-            session = "LONDON"
-        elif "TOKYO" in session:
-            session = "TOKYO"
+        with self._lock:
+            self._last_spread = float(spread_pips)
 
-        self._last_session = session
-        base_limit = _SESSION_SPREAD_LIMITS.get(session, _DEFAULT_LIMIT)
+            # Resolve session
+            session = (session_name or self._detect_session()).upper()
+            # Normalize common variations
+            session = session.replace("NEW YORK", "NEW_YORK").replace("LDN/NY", "LDN_NY")
+            if "LONDON" in session and "NY" in session:
+                session = "LDN_NY"
+            elif "NEW" in session or "YORK" in session:
+                session = "NEW_YORK"
+            elif "LONDON" in session:
+                session = "LONDON"
+            elif "TOKYO" in session:
+                session = "TOKYO"
 
-        # Adjust for volatility: high vol → allow slightly wider spread
-        if vol_index >= 1.5:
-            limit = base_limit * 1.2
-        elif vol_index <= 0.5:
-            limit = base_limit * 0.85
-        else:
-            limit = base_limit
+            self._last_session = session
+            base_limit = _SESSION_SPREAD_LIMITS.get(session, _DEFAULT_LIMIT)
 
-        self._last_limit = round(limit, 2)
+            # Adjust for volatility: high vol → allow slightly wider spread
+            safe_vol = vol_index if vol_index is not None and not math.isnan(vol_index) else 1.0
+            if safe_vol >= 1.5:
+                limit = base_limit * 1.2
+            elif safe_vol <= 0.5:
+                limit = base_limit * 0.85
+            else:
+                limit = base_limit
 
-        if spread_pips > limit:
-            self._rejected_count += 1
+            self._last_limit = round(limit, 2)
+
+            if spread_pips > limit:
+                self._rejected_count += 1
+                reason = (
+                    f"SPREAD REJECT [{session}]: {spread_pips:.2f}pip > limit {limit:.2f}pip "
+                    f"(vol_idx={safe_vol:.2f})"
+                )
+                logger.debug(f"[SPREAD OPT] {reason}")
+                return False, reason
+
+            self._accepted_count += 1
             reason = (
-                f"SPREAD REJECT [{session}]: {spread_pips:.2f}pip > limit {limit:.2f}pip "
-                f"(vol_idx={vol_index:.2f})"
+                f"spread ok [{session}]: {spread_pips:.2f}pip <= {limit:.2f}pip"
             )
-            logger.debug(f"[SPREAD OPT] {reason}")
-            return False, reason
-
-        self._accepted_count += 1
-        reason = (
-            f"spread ok [{session}]: {spread_pips:.2f}pip <= {limit:.2f}pip"
-        )
-        return True, reason
+            return True, reason
 
     def info(self) -> dict:
         """Summary dict for live_status.json."""
-        return {
-            "last_spread_pips": round(self._last_spread, 2),
-            "session": self._last_session,
-            "limit_pips": self._last_limit,
-            "accepted": self._accepted_count,
-            "rejected": self._rejected_count,
-        }
+        with self._lock:
+            return {
+                "last_spread_pips": round(self._last_spread, 2),
+                "session": self._last_session,
+                "limit_pips": self._last_limit,
+                "accepted": self._accepted_count,
+                "rejected": self._rejected_count,
+            }
 
 
 # Module-level singleton

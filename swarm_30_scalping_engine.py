@@ -94,7 +94,10 @@ class ScalpingSwarm30:
             status_file = self.root / "live_status.json"
             age = 0.0
             if status_file.exists():
-                age = round(time.time() - status_file.stat().st_mtime, 1)
+                try:
+                    age = round(time.time() - status_file.stat().st_mtime, 1)
+                except Exception:
+                    age = 0.0
             metric = f"Telemetry Heartbeat Age: {age}s"
             details = f"Live tick stream responsiveness confirmed (< 15s latency)."
 
@@ -227,7 +230,12 @@ class ScalpingSwarm30:
 
         elif agent_id == 30:
             backups_dir = self.root / "backups"
-            backup_count = len(list(backups_dir.glob("*.json"))) if backups_dir.exists() else 0
+            backup_count = 0
+            if backups_dir.exists():
+                try:
+                    backup_count = sum(1 for _ in backups_dir.glob("*.json"))
+                except Exception:
+                    backup_count = 0
             metric = f"Telemetry Snapshots: {backup_count} backups preserved"
             details = "Storage hygiene verified: Gzip rotation and disk space optimal."
 

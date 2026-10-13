@@ -4,6 +4,8 @@ If the spread widens 3x or more over the last 5 ticks (liquidity thinning fast),
 block new entries for 60 seconds to avoid entering during illiquid spikes.
 """
 
+import math
+import threading
 import time
 from collections import deque
 
@@ -20,6 +22,7 @@ class SpreadMomentumGuard:
     MIN_TICKS = 3              # Minimum ticks before we start checking
 
     def __init__(self):
+        self._lock = threading.Lock()
         self._spread_history = deque(maxlen=self.WINDOW + 5)
         self._block_until = 0.0
         self.total_spikes_detected = 0
@@ -29,12 +32,15 @@ class SpreadMomentumGuard:
 
     def update(self, spread_pips: float):
         """Feed current spread. Call every tick."""
-        if spread_pips > 0:
-            self._spread_history.append(spread_pips)
-            self.last_spread = spread_pips
+        if spread_pips is None or math.isnan(spread_pips) or math.isinf(spread_pips) or spread_pips <= 0:
+            return
 
-        if len(self._spread_history) >= self.MIN_TICKS:
-            self._check_spike()
+        with self._lock:
+            self._spread_history.append(float(spread_pips))
+            self.last_spread = float(spread_pips)
+
+            if len(self._spread_history) >= self.MIN_TICKS:
+                self._check_spike()
 
     def _check_spike(self):
         spreads = list(self._spread_history)
@@ -50,31 +56,35 @@ class SpreadMomentumGuard:
         if ratio >= self.SPIKE_RATIO:
             now = time.time()
             if now >= self._block_until:
-                # New spike - extend block
-                self._block_until = now + self.BLOCK_SECONDS
+                # New spike - count new event
                 self.total_spikes_detected += 1
                 self.total_blocks += 1
+            # Extend block window to protect against prolonged illiquidity
+            self._block_until = max(self._block_until, now + self.BLOCK_SECONDS)
 
     def is_entry_blocked(self) -> bool:
         """Returns True if spread spike block is active."""
-        return time.time() < self._block_until
+        with self._lock:
+            return time.time() < self._block_until
 
     def seconds_remaining(self) -> float:
         """Seconds until spread block expires."""
-        return max(0.0, self._block_until - time.time())
+        with self._lock:
+            return max(0.0, self._block_until - time.time())
 
     def info(self) -> dict:
-        return {
-            "spike_ratio_threshold": self.SPIKE_RATIO,
-            "window_ticks": self.WINDOW,
-            "block_seconds": self.BLOCK_SECONDS,
-            "currently_blocked": self.is_entry_blocked(),
-            "seconds_remaining": round(self.seconds_remaining(), 1),
-            "last_spread_pips": round(self.last_spread, 2),
-            "last_spike_ratio": round(self.last_spike_ratio, 2),
-            "total_spikes_detected": self.total_spikes_detected,
-            "total_blocks": self.total_blocks,
-        }
+        with self._lock:
+            return {
+                "spike_ratio_threshold": self.SPIKE_RATIO,
+                "window_ticks": self.WINDOW,
+                "block_seconds": self.BLOCK_SECONDS,
+                "currently_blocked": time.time() < self._block_until,
+                "seconds_remaining": round(max(0.0, self._block_until - time.time()), 1),
+                "last_spread_pips": round(self.last_spread, 2),
+                "last_spike_ratio": round(self.last_spike_ratio, 2),
+                "total_spikes_detected": self.total_spikes_detected,
+                "total_blocks": self.total_blocks,
+            }
 
 
 # Module-level singleton

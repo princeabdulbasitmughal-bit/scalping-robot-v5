@@ -4,6 +4,8 @@ If daily PnL > +$150, tighten TP to 80% of normal to lock in profits more aggres
 Also, if daily PnL < -$100, widen TP slightly to 110% to attempt recovery (use carefully).
 """
 import logging
+import math
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,7 @@ class ProfitTargetShift:
     """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._last_factor: float = 1.0
         self._mode: str = "NORMAL"
 
@@ -35,35 +38,42 @@ class ProfitTargetShift:
         Returns:
             float: Modified TP in pips.
         """
-        if daily_pnl >= _TP_TIGHTEN_THRESHOLD:
-            factor = _TIGHTEN_FACTOR
-            mode = "PROFIT_LOCK"
-        elif daily_pnl <= _TP_LOOSEN_THRESHOLD:
-            factor = _LOOSEN_FACTOR
-            mode = "RECOVERY"
-        else:
-            factor = 1.0
-            mode = "NORMAL"
+        if raw_tp_pips is None or math.isnan(raw_tp_pips) or math.isinf(raw_tp_pips) or raw_tp_pips <= 0:
+            return raw_tp_pips
 
-        if mode != self._mode:
-            self._mode = mode
-            self._last_factor = factor
-            logger.info(
-                f"[PROFIT TARGET SHIFT] Mode changed to {mode} — "
-                f"TP factor={factor:.2f}x (daily_pnl=${daily_pnl:+.2f})"
-            )
+        safe_pnl = 0.0 if (daily_pnl is None or math.isnan(daily_pnl) or math.isinf(daily_pnl)) else float(daily_pnl)
 
-        adjusted = round(raw_tp_pips * factor, 1)
-        return adjusted
+        with self._lock:
+            if safe_pnl >= _TP_TIGHTEN_THRESHOLD:
+                factor = _TIGHTEN_FACTOR
+                mode = "PROFIT_LOCK"
+            elif safe_pnl <= _TP_LOOSEN_THRESHOLD:
+                factor = _LOOSEN_FACTOR
+                mode = "RECOVERY"
+            else:
+                factor = 1.0
+                mode = "NORMAL"
+
+            if mode != self._mode:
+                self._mode = mode
+                self._last_factor = factor
+                logger.info(
+                    f"[PROFIT TARGET SHIFT] Mode changed to {mode} — "
+                    f"TP factor={factor:.2f}x (daily_pnl=${safe_pnl:+.2f})"
+                )
+
+            adjusted = round(raw_tp_pips * factor, 1)
+            return adjusted
 
     # ------------------------------------------------------------------
     def info(self) -> dict:
-        return {
-            "mode": self._mode,
-            "tp_factor": self._last_factor,
-            "tighten_threshold_usd": _TP_TIGHTEN_THRESHOLD,
-            "loosen_threshold_usd": _TP_LOOSEN_THRESHOLD,
-        }
+        with self._lock:
+            return {
+                "mode": self._mode,
+                "tp_factor": self._last_factor,
+                "tighten_threshold_usd": _TP_TIGHTEN_THRESHOLD,
+                "loosen_threshold_usd": _TP_LOOSEN_THRESHOLD,
+            }
 
 
 # Module-level singleton

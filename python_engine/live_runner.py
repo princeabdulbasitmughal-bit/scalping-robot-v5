@@ -30,6 +30,8 @@ class ScalpingLiveRunner:
         self.balance = 10000.0
         self.equity = 10000.0
         self.trades_history = []
+        self.total_trades_count = 0
+        self.winning_trades_count = 0
         self.daily_pnl = 0.0
         self.last_bar_time = time.time()
         
@@ -122,7 +124,12 @@ class ScalpingLiveRunner:
                     pos["pnl"] = round(pnl, 2)
                     pos["close_time"] = datetime.now(timezone.utc).isoformat()
                     pos["close_price"] = self.current_price
+                    self.total_trades_count += 1
+                    if pnl > 0:
+                        self.winning_trades_count += 1
                     self.trades_history.append(pos)
+                    if len(self.trades_history) > 1000:
+                        self.trades_history = self.trades_history[-1000:]
                 else:
                     remaining.append(pos)
                     
@@ -134,7 +141,7 @@ class ScalpingLiveRunner:
                 tp_dist = float(self.robot.config.get("tp_pips", 15.0)) * pip_size
                 sl_dist = float(self.robot.config.get("sl_pips", 30.0)) * pip_size
                 order = {
-                    "id": len(self.trades_history) + len(self.robot.open_positions) + 1,
+                    "id": self.total_trades_count + len(self.robot.open_positions) + 1,
                     "type": sig,
                     "symbol": self.robot.config.get("symbol", "XAUUSD"),
                     "entry": self.current_price,
@@ -152,6 +159,10 @@ class ScalpingLiveRunner:
             )
             self.equity = round(self.balance + floating_pnl, 2)
             
+            total_trades = self.total_trades_count if self.total_trades_count > 0 else len(self.trades_history)
+            win_count = self.winning_trades_count if self.total_trades_count > 0 else len([t for t in self.trades_history if t.get("pnl", 0) > 0])
+            win_rate = round(win_count / total_trades * 100.0, 1) if total_trades > 0 else 0.0
+
             status = {
                 "status": "ACTIVE_SCALPING",
                 "symbol": self.robot.config.get("symbol", "XAUUSD"),
@@ -160,8 +171,8 @@ class ScalpingLiveRunner:
                 "equity": self.equity,
                 "daily_pnl": round(self.daily_pnl, 2),
                 "open_positions": self.robot.open_positions,
-                "total_trades": len(self.trades_history),
-                "win_rate_pct": round(len([t for t in self.trades_history if t.get("pnl", 0) > 0]) / len(self.trades_history) * 100.0, 1) if self.trades_history else 0.0,
+                "total_trades": total_trades,
+                "win_rate_pct": win_rate,
                 "last_signal": sig,
                 "spread_pips": spread,
                 "updated_at": datetime.now(timezone.utc).isoformat()

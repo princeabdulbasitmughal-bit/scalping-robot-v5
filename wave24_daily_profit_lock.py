@@ -7,6 +7,8 @@ This prevents giving back profits after a good day.
 """
 
 import logging
+import math
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,7 @@ class DailyProfitLock:
         daily_target_usd: float = None,
         **kwargs,
     ):
+        self._lock = threading.Lock()
         if daily_target_usd is not None:
             resolved_target = daily_target_usd
         elif profit_target_usd is not None:
@@ -51,65 +54,78 @@ class DailyProfitLock:
         Does NOT auto-disengage during the same trading day
         (daily reset in mt5_live_trader handles midnight UTC reset).
         """
-        if daily_pnl > self._peak_daily_pnl:
-            self._peak_daily_pnl = daily_pnl
+        if daily_pnl is None or math.isnan(daily_pnl) or math.isinf(daily_pnl):
+            return
 
-        if not self._protect_mode and daily_pnl >= self._profit_target:
-            self._protect_mode = True
-            self._engagements += 1
-            logger.info(
-                f"[PROFIT LOCK] ENGAGED #{self._engagements}: "
-                f"daily_pnl=${daily_pnl:.2f} >= target=${self._profit_target:.2f} "
-                f"— lot→{self._protect_lot} score_min→{self._protect_score}"
-            )
+        with self._lock:
+            if daily_pnl > self._peak_daily_pnl:
+                self._peak_daily_pnl = float(daily_pnl)
+
+            if not self._protect_mode and daily_pnl >= self._profit_target:
+                self._protect_mode = True
+                self._engagements += 1
+                logger.info(
+                    f"[PROFIT LOCK] ENGAGED #{self._engagements}: "
+                    f"daily_pnl=${daily_pnl:.2f} >= target=${self._profit_target:.2f} "
+                    f"— lot→{self._protect_lot} score_min→{self._protect_score}"
+                )
 
     def reset(self) -> None:
         """Call on midnight UTC daily reset."""
-        self._protect_mode = False
-        self._peak_daily_pnl = 0.0
-        logger.info("[PROFIT LOCK] Daily reset — protect mode cleared")
+        with self._lock:
+            self._protect_mode = False
+            self._peak_daily_pnl = 0.0
+            logger.info("[PROFIT LOCK] Daily reset — protect mode cleared")
 
     # ------------------------------------------------------------------
     @property
     def is_active(self) -> bool:
-        return self._protect_mode
+        with self._lock:
+            return self._protect_mode
 
     @property
     def profit_target_usd(self) -> float:
-        return self._profit_target
+        with self._lock:
+            return self._profit_target
 
     @property
     def daily_target_usd(self) -> float:
-        return self._profit_target
+        with self._lock:
+            return self._profit_target
 
     def apply_lot(self, current_lot: float) -> float:
         """Return adjusted lot — reduced to protect_lot when locked."""
-        if self._protect_mode:
-            new_lot = min(current_lot, self._protect_lot)
-            if new_lot < current_lot:
-                logger.debug(
-                    f"[PROFIT LOCK] Lot reduced: {current_lot:.2f} → {new_lot:.2f}"
-                )
-            return new_lot
-        return current_lot
+        if current_lot is None or math.isnan(current_lot) or math.isinf(current_lot) or current_lot <= 0:
+            return current_lot
+        with self._lock:
+            if self._protect_mode:
+                new_lot = min(current_lot, self._protect_lot)
+                if new_lot < current_lot:
+                    logger.debug(
+                        f"[PROFIT LOCK] Lot reduced: {current_lot:.2f} → {new_lot:.2f}"
+                    )
+                return new_lot
+            return current_lot
 
     def get_min_score(self, base_min_score: int = 55) -> int:
         """Return minimum signal score required — higher in protect mode."""
-        if self._protect_mode:
-            return max(base_min_score, self._protect_score)
-        return base_min_score
+        with self._lock:
+            if self._protect_mode:
+                return max(base_min_score, self._protect_score)
+            return base_min_score
 
     def info(self) -> dict:
         """Summary dict for live_status.json."""
-        return {
-            "protect_mode": self._protect_mode,
-            "profit_target_usd": self._profit_target,
-            "daily_target_usd": self._profit_target,
-            "peak_daily_pnl": round(self._peak_daily_pnl, 2),
-            "engagements": self._engagements,
-            "protect_lot": self._protect_lot,
-            "protect_min_score": self._protect_score,
-        }
+        with self._lock:
+            return {
+                "protect_mode": self._protect_mode,
+                "profit_target_usd": self._profit_target,
+                "daily_target_usd": self._profit_target,
+                "peak_daily_pnl": round(self._peak_daily_pnl, 2),
+                "engagements": self._engagements,
+                "protect_lot": self._protect_lot,
+                "protect_min_score": self._protect_score,
+            }
 
 
 # Module-level singleton

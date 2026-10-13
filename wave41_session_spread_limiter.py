@@ -3,10 +3,10 @@ Wave 41: SessionSpreadLimiter
 During low-liquidity sessions (Tokyo for gold), reject trades if spread > session threshold.
 Tokyo: max 1.5 pips | London pre-open (06:00-07:00 UTC): max 2.0 pips | All other: max 3.0 pips
 """
-import time
-import datetime
-from datetime import timezone
 import logging
+import math
+import threading
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,7 @@ class SessionSpreadLimiter:
     """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._last_session: str = "default"
         self._last_spread: float = 0.0
         self._last_limit: float = _SESSION_LIMITS["default"]
@@ -47,31 +48,37 @@ class SessionSpreadLimiter:
         Args:
             spread_pips: Current bid-ask spread in pips.
         """
-        utc_hour = datetime.datetime.now(timezone.utc).hour
+        if spread_pips is None or math.isnan(spread_pips) or math.isinf(spread_pips) or spread_pips < 0:
+            logger.warning(f"[SESSION SPREAD LIMITER] Blocked — invalid spread value ({spread_pips})")
+            return True
+
+        utc_hour = datetime.now(timezone.utc).hour
         session = self._get_session(utc_hour)
         limit = _SESSION_LIMITS[session]
 
-        self._last_session = session
-        self._last_spread = spread_pips
-        self._last_limit = limit
+        with self._lock:
+            self._last_session = session
+            self._last_spread = float(spread_pips)
+            self._last_limit = limit
 
-        if spread_pips > limit:
-            self._blocked_count += 1
-            logger.debug(
-                f"[SESSION SPREAD LIMITER] Blocked — session={session} "
-                f"spread={spread_pips:.2f} > limit={limit:.2f} pips"
-            )
-            return True
-        return False
+            if spread_pips > limit:
+                self._blocked_count += 1
+                logger.debug(
+                    f"[SESSION SPREAD LIMITER] Blocked — session={session} "
+                    f"spread={spread_pips:.2f} > limit={limit:.2f} pips"
+                )
+                return True
+            return False
 
     # ------------------------------------------------------------------
     def info(self) -> dict:
-        return {
-            "session": self._last_session,
-            "spread_pips": round(self._last_spread, 3),
-            "limit_pips": self._last_limit,
-            "blocked_count_total": self._blocked_count,
-        }
+        with self._lock:
+            return {
+                "session": self._last_session,
+                "spread_pips": round(self._last_spread, 3),
+                "limit_pips": self._last_limit,
+                "blocked_count_total": self._blocked_count,
+            }
 
 
 # Module-level singleton
