@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 import os
-import datetime
+from datetime import datetime, timezone
 
 # Use the same Python interpreter that is running this script — no hardcoded paths
 PYTHON   = sys.executable
@@ -25,7 +25,7 @@ _MAX_BACKOFF_SEC = 120   # Exponential backoff cap for crash loops
 
 
 def log(msg):
-    ts = datetime.datetime.now().strftime("%H:%M:%S")
+    ts = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
     line = "[{}] [SUP] {}".format(ts, msg)
     try:
         with open(LOG, "a", encoding="utf-8") as f:

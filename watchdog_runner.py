@@ -45,7 +45,7 @@ def _hidden_startupinfo():
 
 
 def log(msg: str):
-    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ts = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
     line = f'[{ts}] {msg}'
     print(line, flush=True)
     try:
@@ -60,7 +60,7 @@ def log_restart(target: str, reason: str, restart_count: int = 0, backoff_second
     Send restart notification to watchdog.log with:
     timestamp, reason, restart_count, backoff_seconds
     """
-    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ts = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
     line = f'[{ts}] [RESTART] {target} restart triggered -- reason: {reason} | restart_count={restart_count} | backoff_seconds={backoff_seconds}'
     print(line, flush=True)
     try:

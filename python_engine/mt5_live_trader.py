@@ -1388,6 +1388,13 @@ class MT5LiveTrader:
                         except Exception:
                             pass
 
+                    # RiskGuard: Record closed trade PnL into fail-closed risk state
+                    if self.risk_guard is not None:
+                        try:
+                            self.risk_guard.record_trade(pnl)
+                        except Exception:
+                            pass
+
                 else:
                     remaining_positions.append(pos)
 
@@ -1448,10 +1455,16 @@ class MT5LiveTrader:
                     gap_guard.update_price(current_price)
                 except Exception:
                     pass
+            # Wave 20: Feed spike filter price tracker
+            if _WAVES_LOADED and spike_filter is not None:
+                try:
+                    spike_filter.update(current_price)
+                except Exception:
+                    pass
             # Wave 36: Feed spread momentum guard
             if _WAVES_LOADED and spread_momentum_guard is not None:
                 try:
-                    _cur_spread = getattr(self, '_last_spread_pips', 0.0)
+                    _cur_spread = getattr(self, 'spread_pips', getattr(self, '_last_spread_pips', 0.0))
                     spread_momentum_guard.update(_cur_spread)
                 except Exception:
                     pass
@@ -1465,6 +1478,12 @@ class MT5LiveTrader:
             if _WAVES_LOADED and drawdown_pause is not None:
                 try:
                     drawdown_pause.update(self.equity)
+                except Exception:
+                    pass
+            # Wave 41: Feed session spread limiter with current spread
+            if _WAVES_LOADED and session_spread_limiter is not None:
+                try:
+                    session_spread_limiter.is_entry_blocked(getattr(self, 'spread_pips', 0.0))
                 except Exception:
                     pass
             # Wave 42: Record tick arrival for tick-volume / dead-market filter
@@ -1514,7 +1533,7 @@ class MT5LiveTrader:
             # Wave 54: Feed current spread to max spread per trade guard
             if _WAVES_LOADED and max_spread_per_trade is not None:
                 try:
-                    _spread54 = getattr(self, '_last_spread_pips', 0.0)
+                    _spread54 = getattr(self, 'spread_pips', getattr(self, '_last_spread_pips', 0.0))
                     max_spread_per_trade.update(_spread54)
                 except Exception:
                     pass
@@ -1586,6 +1605,13 @@ class MT5LiveTrader:
                     try:
                         daily_profit_lock.reset()
                         logger.info("[DAILY RESET] Wave 24: daily_profit_lock reset.")
+                    except Exception:
+                        pass
+
+                # RiskGuard: Reset daily loss counter at midnight UTC
+                if self.risk_guard is not None:
+                    try:
+                        self.risk_guard.reset_daily_loss()
                     except Exception:
                         pass
 
@@ -1822,6 +1848,12 @@ class MT5LiveTrader:
                         sys.stdout.write(msg)
                         sys.stdout.flush()
                         logger.info(msg.strip())
+
+                        if self.risk_guard is not None:
+                            try:
+                                self.risk_guard.record_trade(pnl)
+                            except Exception:
+                                pass
                     else:
                         # Wave 7: Time-based exits (check before keeping position)
                         open_time_str = pos.get("open_time", "")
@@ -1865,6 +1897,11 @@ class MT5LiveTrader:
                                     else:
                                         self.consecutive_losses = 0
                                         self.daily_wins += 1
+                                    if self.risk_guard is not None:
+                                        try:
+                                            self.risk_guard.record_trade(pnl)
+                                        except Exception:
+                                            pass
                                     tmsg = f"[TIME EXIT] {pos.get('type')} | {close_reason} | {minutes_open:.1f}min | PnL: ${pnl:+,.2f}\n"
                                     sys.stdout.write(tmsg)
                                     sys.stdout.flush()
@@ -2820,6 +2857,14 @@ class MT5LiveTrader:
                 ),
                 "bb_squeeze": getattr(self, "_bb_squeeze", False),
                 "ema_cross": getattr(self, "_ema_cross_signal", "NEUTRAL"),
+                "ema_cross_signal": getattr(self, "_ema_cross_signal", "NEUTRAL"),
+                "win_rate": float(win_rate),
+                "grade": "A+" if win_rate > 90.0 else "A" if win_rate > 85.0 else "B" if win_rate >= 75.0 else "C",
+                "circuit_breaker_fired": bool(getattr(self, "_circuit_breaker_fired", False)),
+                "circuit_breaker_active": bool(getattr(self, "_circuit_breaker_fired", False)),
+                "pid": os.getpid(),
+                "trader_pid": os.getpid(),
+                "trade_history": last_trades_snapshot,
                 "kelly_win_rate": round(
                     sum(getattr(self, "_recent_results", []) or [0]) /
                     max(len(getattr(self, "_recent_results", []) or [0]), 1) * 100, 1
@@ -3128,6 +3173,24 @@ class MT5LiveTrader:
             if _WAVES_LOADED and opening_range_breakout is not None:
                 try:
                     state["opening_range_breakout"] = opening_range_breakout.info()
+                except Exception:
+                    pass
+
+            # RiskGuard: Inject fail-closed 10-invariant risk guard state
+            if self.risk_guard is not None:
+                try:
+                    state["risk_guard"] = {
+                        **dict(self.risk_guard.state),
+                        "kill_switch_active": bool(
+                            self.config.get("kill_switch", False) or self.risk_guard.kill_switch_path.exists()
+                        ),
+                        "min_balance_usd": float(self.config.get("min_balance_usd", 9700.0)),
+                        "max_daily_loss_usd": float(self.config.get("max_daily_loss_usd", 200.0)),
+                        "max_open_positions": int(
+                            self.config.get("max_positions_per_session", self.config.get("max_open_positions", 3))
+                        ),
+                        "spread_filter_pips": float(self.config.get("spread_filter_pips", 3.0)),
+                    }
                 except Exception:
                     pass
 
