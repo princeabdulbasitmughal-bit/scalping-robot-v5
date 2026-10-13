@@ -10,8 +10,12 @@ Re-engineers and enhances the MQL4 Scalping Robot 5.0 EA logic with institutiona
 
 import math
 import time
+import logging
+import threading
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple, Union
+
+logger = logging.getLogger(__name__)
 
 
 class ScalpingSignal:
@@ -55,13 +59,14 @@ class EconomicNewsFilter:
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
                 return dt.timestamp()
-            except Exception as e:
+            except Exception:
                 for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
                     try:
                         dt = datetime.strptime(event_time, fmt).replace(tzinfo=timezone.utc)
                         return dt.timestamp()
-                    except ValueError as e:
+                    except ValueError:
                         continue
+                logger.warning("[NEWS FILTER] Failed to parse event timestamp: %s", event_time)
         return 0.0
 
     def add_event(
@@ -246,6 +251,7 @@ class ScalpingRobotV5:
         self.trade_history: List[Dict[str, Any]] = []
         self.equity_peak = 10000.0
         self.current_balance = 10000.0
+        self._lock = threading.Lock()
 
     def calculate_indicators(self, bars: List[Dict[str, float]]) -> Dict[str, Any]:
         """
@@ -522,7 +528,7 @@ class ScalpingRobotV5:
         During elevated ATR or post-shock regimes, stop distance dynamically widens to prevent
         whipsaw liquidations while maintaining risk integrity.
         """
-        pip_size = float(self.config.get("pip_size", 0.1))
+        pip_size = max(1e-6, float(self.config.get("pip_size", 0.1)))
         base_sl_pips = float(self.config.get("sl_pips", 30.0))
         base_tp_pips = float(self.config.get("tp_pips", 15.0))
 
@@ -574,32 +580,46 @@ class ScalpingRobotV5:
           Lots = Risk Dollars / (Effective SL * Pip Value)
         Clamped within broker min/max lot constraints.
         """
-        # Guard: refuse to trade with zero or negative balance
-        account_balance_f = float(account_balance)
-        if account_balance_f <= 0:
-            logger.warning("[SIZING] Account balance <= 0 (%.2f) — returning 0.0 lots", account_balance_f)
+        # Guard: refuse to trade with NaN, zero or negative balance
+        try:
+            account_balance_f = float(account_balance)
+        except (TypeError, ValueError):
+            return 0.0
+        if math.isnan(account_balance_f) or account_balance_f <= 0:
+            logger.warning("[SIZING] Account balance <= 0 or NaN (%.2f) — returning 0.0 lots", account_balance_f)
             return 0.0
         bal = account_balance_f
-        risk_pct = float(risk_percent if risk_percent is not None else self.config.get("risk_percent", 1.0))
+
+        try:
+            risk_pct = float(risk_percent if risk_percent is not None else self.config.get("risk_percent", 1.0))
+        except (TypeError, ValueError):
+            risk_pct = 1.0
+        if math.isnan(risk_pct) or risk_pct <= 0:
+            return 0.0
         risk_dollars = bal * (risk_pct / 100.0)
 
         pip_value = float(self.config.get("pip_value", 1.0))
-        if pip_value <= 0:
-            logger.error("[SIZING] pip_value <= 0 in config — REJECT (fail-closed)")
+        if pip_value <= 0 or math.isnan(pip_value):
+            logger.error("[SIZING] pip_value <= 0 or NaN in config — REJECT (fail-closed)")
             return 0.0
         min_lots = float(self.config.get("min_lot_size", 0.01))
         max_lots = float(self.config.get("max_lot_size", 5.0))
-        lot_step = float(self.config.get("lot_step", 0.01))
+        lot_step = max(1e-4, float(self.config.get("lot_step", 0.01)))
 
-        if sl_pips is not None and sl_pips > 0:
+        if sl_pips is not None and sl_pips > 0 and not math.isnan(sl_pips):
             effective_sl_pips = sl_pips
         else:
             stops = self.calculate_dynamic_stops(indicators)
             effective_sl_pips = float(stops.get("sl_pips", float(self.config.get("sl_pips", 30.0))))
 
+        if math.isnan(effective_sl_pips) or effective_sl_pips <= 0:
+            effective_sl_pips = 30.0
+
         # Dollar risk per lot = Stop Loss in Pips * Pip Value per Lot
         risk_per_lot = max(1e-4, effective_sl_pips * pip_value)
         raw_lots = risk_dollars / risk_per_lot
+        if math.isnan(raw_lots) or raw_lots <= 0:
+            return 0.0
 
         # Quantize to lot step (epsilon avoids floating-point floor truncation e.g. 0.29/0.01 -> 28)
         steps = math.floor(raw_lots / lot_step + 1e-9)

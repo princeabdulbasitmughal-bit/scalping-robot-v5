@@ -12,6 +12,7 @@ micro-size while losses continue.
 """
 from __future__ import annotations
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class DrawdownAccelerator:
         self._consec_losses: int = 0
         self._consec_wins: int = 0
         self._total_reductions: int = 0
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------ #
     #  Public API                                                           #
@@ -51,49 +53,55 @@ class DrawdownAccelerator:
 
     def record_trade(self, won: bool) -> None:
         """Update streak counters after each closed trade."""
-        if won:
-            self._consec_wins += 1
-            self._consec_losses = 0
-            if self._consec_wins >= self._recovery_wins:
-                # Full recovery
+        with self._lock:
+            if won:
+                self._consec_wins += 1
+                self._consec_losses = 0
+                if self._consec_wins >= self._recovery_wins:
+                    # Full recovery
+                    self._consec_wins = 0
+                    logger.info(
+                        "[WAVE25] %d consecutive wins → lot multiplier RESET to 1.0",
+                        self._recovery_wins,
+                    )
+            else:
+                self._consec_losses += 1
                 self._consec_wins = 0
-                logger.info(
-                    "[WAVE25] %d consecutive wins → lot multiplier RESET to 1.0",
-                    self._recovery_wins,
-                )
-        else:
-            self._consec_losses += 1
-            self._consec_wins = 0
-            multiplier = self._get_multiplier()
-            if multiplier < 1.0:
-                self._total_reductions += 1
-                logger.warning(
-                    "[WAVE25] Consecutive losses=%d → lot multiplier=%.2f",
-                    self._consec_losses,
-                    multiplier,
-                )
+                multiplier = self._get_multiplier()
+                if multiplier < 1.0:
+                    self._total_reductions += 1
+                    logger.warning(
+                        "[WAVE25] Consecutive losses=%d → lot multiplier=%.2f",
+                        self._consec_losses,
+                        multiplier,
+                    )
 
     def apply_lot(self, lot: float) -> float:
         """Return the adjusted lot size based on current streak."""
-        multiplier = self._get_multiplier()
-        if multiplier >= 1.0:
-            return lot
-        adjusted = round(max(lot * multiplier, 0.01), 2)
-        return adjusted
+        if lot <= 0.0:
+            return 0.0
+        with self._lock:
+            multiplier = self._get_multiplier()
+            if multiplier >= 1.0:
+                return lot
+            adjusted = round(max(lot * multiplier, 0.01), 2)
+            return adjusted
 
     def get_multiplier(self) -> float:
         """Return current lot multiplier (1.0 = no reduction)."""
-        return self._get_multiplier()
+        with self._lock:
+            return self._get_multiplier()
 
     def info(self) -> dict:
         """Return status dict for live_status.json."""
-        return {
-            "consec_losses": self._consec_losses,
-            "consec_wins": self._consec_wins,
-            "lot_multiplier": round(self._get_multiplier(), 2),
-            "total_reductions": self._total_reductions,
-            "mode": self._mode_label(),
-        }
+        with self._lock:
+            return {
+                "consec_losses": self._consec_losses,
+                "consec_wins": self._consec_wins,
+                "lot_multiplier": round(self._get_multiplier(), 2),
+                "total_reductions": self._total_reductions,
+                "mode": self._mode_label(),
+            }
 
     # ------------------------------------------------------------------ #
     #  Internal helpers                                                     #

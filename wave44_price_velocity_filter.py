@@ -5,6 +5,7 @@ fast-moving markets. Keeps track of the last N prices with timestamps.
 """
 
 import time
+import threading
 from collections import deque
 import logging
 
@@ -25,13 +26,15 @@ class PriceVelocityFilter:
         self._window_sec = window_sec
         self._history: deque = deque(maxlen=_MAX_HISTORY)  # (timestamp, price)
         self._last_velocity: float = 0.0
+        self._lock = threading.Lock()
 
     def update(self, price: float) -> None:
         """Feed price each tick."""
-        self._history.append((time.time(), price))
+        with self._lock:
+            self._history.append((time.time(), price))
 
-    def _velocity_pips(self) -> float:
-        """Return max price range (in pips) within the last _window_sec."""
+    def _velocity_pips_locked(self) -> float:
+        """Return max price range (in pips) within the last _window_sec. Must be called with lock."""
         if len(self._history) < 2:
             return 0.0
         cutoff = time.time() - self._window_sec
@@ -42,8 +45,10 @@ class PriceVelocityFilter:
 
     def is_entry_blocked(self) -> bool:
         """Return True if price is moving too fast to enter safely."""
-        self._last_velocity = self._velocity_pips()
-        if self._last_velocity > self._pip_limit:
+        with self._lock:
+            self._last_velocity = self._velocity_pips_locked()
+            blocked = self._last_velocity > self._pip_limit
+        if blocked:
             logger.info(
                 f"[WAVE44] Price velocity {self._last_velocity:.1f} pips/"
                 f"{self._window_sec:.0f}s exceeds {self._pip_limit:.1f} pip limit — skipping entry"
@@ -52,12 +57,13 @@ class PriceVelocityFilter:
         return False
 
     def info(self) -> dict:
-        return {
-            "velocity_pips": round(self._last_velocity, 2),
-            "pip_limit": self._pip_limit,
-            "window_sec": self._window_sec,
-            "blocked": self._last_velocity > self._pip_limit,
-        }
+        with self._lock:
+            return {
+                "velocity_pips": round(self._last_velocity, 2),
+                "pip_limit": self._pip_limit,
+                "window_sec": self._window_sec,
+                "blocked": self._last_velocity > self._pip_limit,
+            }
 
 
 # Module-level singleton

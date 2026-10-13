@@ -9,6 +9,7 @@ Recovery condition: balance recovers > halt_balance * recovery_factor  OR  N_goo
 
 import logging
 import time
+import threading
 from collections import deque
 
 logger = logging.getLogger(__name__)
@@ -28,28 +29,30 @@ class EquityCurveHalt:
         recovery_win_streak: int = 2,
         cooldown_sec: float = 300.0,
     ):
-        self._window = window
+        self._window = max(1, int(window))
         self._loss_threshold = loss_threshold_usd   # sum over window
         self._slope_threshold = slope_threshold      # avg PnL per trade
         self._recovery_win_streak = recovery_win_streak
         self._cooldown_sec = cooldown_sec
 
-        self._pnl_history: deque = deque(maxlen=window)
+        self._pnl_history: deque = deque(maxlen=self._window)
         self._halted: bool = False
         self._halt_time: float = 0.0
         self._halt_balance: float = 0.0
         self._consecutive_wins: int = 0
         self._halt_count: int = 0
         self._halt_reason: str = ""
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     def record_trade(self, pnl: float, won: bool) -> None:
         """Call after every closed trade."""
-        self._pnl_history.append(pnl)
-        if won:
-            self._consecutive_wins += 1
-        else:
-            self._consecutive_wins = 0
+        with self._lock:
+            self._pnl_history.append(pnl)
+            if won:
+                self._consecutive_wins += 1
+            else:
+                self._consecutive_wins = 0
 
     # ------------------------------------------------------------------
     def is_trading_allowed(self, current_balance: float) -> tuple:
@@ -57,6 +60,10 @@ class EquityCurveHalt:
         Returns (allowed: bool, reason: str).
         Call before each signal evaluation.
         """
+        with self._lock:
+            return self._is_trading_allowed_locked(current_balance)
+
+    def _is_trading_allowed_locked(self, current_balance: float) -> tuple:
         # --- Check recovery if already halted ---
         if self._halted:
             elapsed = time.time() - self._halt_time
@@ -85,7 +92,7 @@ class EquityCurveHalt:
             return True, f"eq_ok (warming up {len(self._pnl_history)}/{self._window})"
 
         window_sum = sum(self._pnl_history)
-        slope = window_sum / self._window   # average PnL per trade
+        slope = window_sum / max(1, self._window)   # average PnL per trade
 
         if window_sum < self._loss_threshold and slope < self._slope_threshold:
             self._halted = True
@@ -105,15 +112,16 @@ class EquityCurveHalt:
 
     def info(self) -> dict:
         """Summary dict for live_status.json."""
-        window_list = list(self._pnl_history)
-        return {
-            "halted": self._halted,
-            "halt_count": self._halt_count,
-            "halt_reason": self._halt_reason,
-            "window_pnl_sum": round(sum(window_list), 2) if window_list else 0.0,
-            "consecutive_wins": self._consecutive_wins,
-            "trades_in_window": len(window_list),
-        }
+        with self._lock:
+            window_list = list(self._pnl_history)
+            return {
+                "halted": self._halted,
+                "halt_count": self._halt_count,
+                "halt_reason": self._halt_reason,
+                "window_pnl_sum": round(sum(window_list), 2) if window_list else 0.0,
+                "consecutive_wins": self._consecutive_wins,
+                "trades_in_window": len(window_list),
+            }
 
 
 # Module-level singleton

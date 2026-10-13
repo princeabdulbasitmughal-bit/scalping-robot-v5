@@ -20,13 +20,18 @@ class TradeJournal:
         self._init_db()
 
     def _get_conn(self):
+        conn = None
         try:
             conn = sqlite3.connect(self.db_path, timeout=10)
             conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA busy_timeout=10000;")
             return conn
         except Exception as e:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
             logger.error("TradeJournal: DB connect error: %s", e)
             return None
 
@@ -37,6 +42,7 @@ class TradeJournal:
                 return
             try:
                 with conn:
+                    conn.execute("PRAGMA journal_mode=WAL;")
                     conn.execute('''
                         CREATE TABLE IF NOT EXISTS trades (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,6 +90,7 @@ class TradeJournal:
             if not conn:
                 return False
             try:
+                pnl_val = float(trade_dict.get('pnl') or 0.0)
                 with conn:
                     conn.execute('''
                         INSERT INTO trades
@@ -95,18 +102,18 @@ class TradeJournal:
                         trade_dict.get('timestamp', datetime.now(timezone.utc).isoformat()),
                         trade_dict.get('symbol', 'XAUUSD'),
                         trade_dict.get('direction', ''),
-                        trade_dict.get('entry_price', 0.0),
-                        trade_dict.get('exit_price', 0.0),
-                        trade_dict.get('lot_size', 0.02),
-                        trade_dict.get('sl_price', 0.0),
-                        trade_dict.get('tp_price', 0.0),
-                        trade_dict.get('pnl', 0.0),
+                        float(trade_dict.get('entry_price') or 0.0),
+                        float(trade_dict.get('exit_price') or 0.0),
+                        float(trade_dict.get('lot_size') or 0.02),
+                        float(trade_dict.get('sl_price') or 0.0),
+                        float(trade_dict.get('tp_price') or 0.0),
+                        pnl_val,
                         trade_dict.get('exit_reason', 'UNKNOWN'),
-                        trade_dict.get('duration_sec', 0),
-                        trade_dict.get('signal_tier', 0),
-                        trade_dict.get('spread_pips', 0.0),
+                        int(trade_dict.get('duration_sec') or 0),
+                        int(trade_dict.get('signal_tier') or 0),
+                        float(trade_dict.get('spread_pips') or 0.0),
                     ))
-                logger.info("TradeJournal: Trade logged pnl=%.2f", trade_dict.get('pnl', 0))
+                logger.info("TradeJournal: Trade logged pnl=%.2f", pnl_val)
                 return True
             except Exception as e:
                 logger.error("TradeJournal: log_trade error: %s", e)
@@ -123,7 +130,7 @@ class TradeJournal:
             conn = self._get_conn()
             if not conn:
                 return False
-            today = summary_dict.get('date', str(date.today()))
+            today = summary_dict.get('date') or datetime.now(timezone.utc).strftime('%Y-%m-%d')
             try:
                 with conn:
                     conn.execute('''
@@ -210,21 +217,24 @@ class TradeJournal:
             cur = conn.execute('''
                 SELECT
                     COUNT(*) as days,
-                    SUM(total_trades) as total_trades,
-                    SUM(wins) as wins,
-                    SUM(losses) as losses,
-                    SUM(total_pnl) as total_pnl,
+                    COALESCE(SUM(total_trades), 0) as total_trades,
+                    COALESCE(SUM(wins), 0) as wins,
+                    COALESCE(SUM(losses), 0) as losses,
+                    COALESCE(SUM(total_pnl), 0.0) as total_pnl,
                     MIN(worst_trade) as worst_trade,
                     MAX(best_trade) as best_trade
                 FROM daily_summary
                 WHERE date >= date('now', '-7 days')
             ''')
             row = cur.fetchone()
-            if row:
+            if row and row['days'] > 0:
                 d = dict(row)
                 total = d.get('total_trades') or 0
                 wins = d.get('wins') or 0
                 d['win_rate'] = round((wins / total * 100), 1) if total > 0 else 0.0
+                d['worst_trade'] = float(d['worst_trade'] or 0.0)
+                d['best_trade'] = float(d['best_trade'] or 0.0)
+                d['total_pnl'] = float(d['total_pnl'] or 0.0)
                 return d
             return {}
         except Exception as e:

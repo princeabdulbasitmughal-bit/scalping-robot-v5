@@ -13,6 +13,7 @@ Usage:
 import math
 import time
 import logging
+import threading
 
 logger = logging.getLogger("wave13_ml")
 
@@ -22,29 +23,41 @@ class LinearRegressor:
 
     def __init__(self):
         self._predictor = None
+        self._lock = threading.Lock()
 
     def _get_predictor(self):
-        if self._predictor is None:
-            self._predictor = MLPredictor(_regressor=self)
-        return self._predictor
+        with self._lock:
+            if self._predictor is None:
+                self._predictor = MLPredictor(_regressor=self)
+            return self._predictor
 
     def fit(self, y: list = None) -> dict:
         if not y:
             return {"slope": 0.0, "intercept": 0.0, "r_squared": 0.0}
-        n = len(y)
+        clean_y = []
+        for val in y:
+            if val is not None:
+                try:
+                    f = float(val)
+                    if not math.isnan(f):
+                        clean_y.append(f)
+                except (ValueError, TypeError):
+                    continue
+        n = len(clean_y)
         if n < 3:
             return {"slope": 0.0, "intercept": 0.0, "r_squared": 0.0}
         x = list(range(n))
         x_mean = sum(x) / n
-        y_mean = sum(y) / n
-        ss_xy = sum((x[i] - x_mean) * (y[i] - y_mean) for i in range(n))
+        y_mean = sum(clean_y) / n
+        ss_xy = sum((x[i] - x_mean) * (clean_y[i] - y_mean) for i in range(n))
         ss_xx = sum((x[i] - x_mean) ** 2 for i in range(n))
-        ss_yy = sum((y[i] - y_mean) ** 2 for i in range(n))
+        ss_yy = sum((clean_y[i] - y_mean) ** 2 for i in range(n))
         if ss_xx == 0:
             return {"slope": 0.0, "intercept": y_mean, "r_squared": 0.0}
         slope = ss_xy / ss_xx
         intercept = y_mean - slope * x_mean
-        r_squared = (ss_xy ** 2 / (ss_xx * ss_yy)) if ss_yy > 0 else 0.0
+        denom = ss_xx * ss_yy
+        r_squared = (ss_xy ** 2 / denom) if denom > 0 else 0.0
         return {"slope": slope, "intercept": intercept, "r_squared": max(0.0, min(1.0, r_squared))}
 
     def predict(self, y: list = None) -> dict:
@@ -87,6 +100,7 @@ class MLPredictor:
         self._prediction_history: list = []  # (timestamp, direction, confidence)
         self._hit_count = 0
         self._total_checked = 0
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     def predict(self, closes: list = None) -> dict:
@@ -103,12 +117,26 @@ class MLPredictor:
               "atr_norm_slope": float
             }
         """
-        if not closes or len(closes) < 5:
+        if not closes:
+            return {"direction": "NEUTRAL", "confidence": 0, "slope": 0.0, "r_squared": 0.0,
+                    "momentum": 0.0, "atr_norm_slope": 0.0}
+
+        clean_closes = []
+        for c in closes:
+            if c is not None:
+                try:
+                    fc = float(c)
+                    if not math.isnan(fc):
+                        clean_closes.append(fc)
+                except (ValueError, TypeError):
+                    continue
+
+        if len(clean_closes) < 5:
             return {"direction": "NEUTRAL", "confidence": 0, "slope": 0.0, "r_squared": 0.0,
                     "momentum": 0.0, "atr_norm_slope": 0.0}
 
         # Use last `window` bars
-        data = closes[-self.window:]
+        data = clean_closes[-self.window:]
         n = len(data)
 
         # 1. Linear regression
@@ -172,7 +200,8 @@ class MLPredictor:
             "momentum": round(momentum, 6),
             "atr_norm_slope": round(atr_norm_slope, 4),
         }
-        self._last_prediction = result
+        with self._lock:
+            self._last_prediction = result
         logger.debug(
             f"[ML PREDICT] dir={direction} conf={confidence}% r2={r2:.3f} "
             f"slope={slope:.5f} atr_norm={atr_norm_slope:.3f} mom={momentum:.5f}"
@@ -221,19 +250,22 @@ class MLPredictor:
     # ------------------------------------------------------------------
     def record_outcome(self, predicted_direction: str, actual_direction: str):
         """Call after a trade closes to track ML accuracy."""
-        self._total_checked += 1
-        if predicted_direction == actual_direction and predicted_direction != "NEUTRAL":
-            self._hit_count += 1
+        with self._lock:
+            self._total_checked += 1
+            if predicted_direction == actual_direction and predicted_direction != "NEUTRAL":
+                self._hit_count += 1
 
     @property
     def accuracy(self) -> float:
-        if self._total_checked == 0:
-            return 0.0
-        return round(100.0 * self._hit_count / self._total_checked, 1)
+        with self._lock:
+            if self._total_checked == 0:
+                return 0.0
+            return round(100.0 * self._hit_count / self._total_checked, 1)
 
     @property
     def last_prediction(self) -> dict:
-        return self._last_prediction
+        with self._lock:
+            return dict(self._last_prediction)
 
 
 # Module-level singleton

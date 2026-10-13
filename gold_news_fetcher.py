@@ -73,29 +73,48 @@ def check_high_impact(headlines):
 
 
 def write_status(high_impact, headlines, avoid_trading):
-    """Write news_status.json."""
     status = {
         'high_impact_alert': high_impact,
-        'last_headlines': [h[0][:100] for h in headlines[:5]],
+        'last_headlines': [h[0][:100] for h in headlines[:5]] if headlines else [],
         'last_checked': datetime.now(timezone.utc).isoformat(),
         'avoid_trading': avoid_trading,
     }
+    tmp = NEWS_STATUS_FILE + f'.{os.getpid()}.tmp'
     try:
-        tmp = NEWS_STATUS_FILE + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(status, f, indent=2)
-        os.replace(tmp, NEWS_STATUS_FILE)
+        # Windows retry loop for transient file sharing lock
+        for attempt in range(5):
+            try:
+                os.replace(tmp, NEWS_STATUS_FILE)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.05)
     except Exception as e:
         logger.error("write_status error: %s", e)
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def _load_last_status() -> dict:
+    """Load previous status from disk (fail-closed fallback)."""
+    try:
+        if os.path.exists(NEWS_STATUS_FILE):
+            with open(NEWS_STATUS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning("_load_last_status error: %s", e)
+    return {}
 
 
 def _load_last_avoid_trading() -> bool:
-    """Load previous avoid_trading state from disk (fail-closed fallback)."""
-    try:
-        with open(NEWS_STATUS_FILE, 'r', encoding='utf-8') as f:
-            return bool(json.load(f).get('avoid_trading', False))
-    except Exception:
-        return False  # First run: default to allowing (no prior state)
+    """Load previous avoid_trading state from disk."""
+    return bool(_load_last_status().get('avoid_trading', False))
 
 
 def run():
@@ -115,13 +134,14 @@ def run():
                 logger.info("Fetched %d items from %s", len(items), feed_url)
 
             if not any_feed_succeeded:
-                # FIX: FAIL-SAFE — all feeds failed, preserve last known avoid_trading state
-                last_state = _load_last_avoid_trading()
+                # FIX: FAIL-SAFE — all feeds failed, preserve last known avoid_trading state and headlines
+                last_data = _load_last_status()
+                last_state = bool(last_data.get('avoid_trading', False))
                 logger.error(
                     "ALL RSS FEEDS FAILED — preserving last avoid_trading=%s (fail-safe)", last_state
                 )
-                # Update last_checked timestamp but keep avoid_trading as-is
-                write_status(last_state, [], last_state)
+                prev_headlines = [(h, "") for h in last_data.get('last_headlines', [])]
+                write_status(last_state, prev_headlines, last_state)
             else:
                 high_impact, matched = check_high_impact(all_headlines)
                 avoid_trading = high_impact
