@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-10-13T09:04:24.869132",
+  "engine": "Scalping Robot V5 \u2014 Wave13 OLS/Ridge Tick Predictor + Wave14 Dynamic ATR Auto-Tuner",
+  "symbol": "XAUUSD",
+  "ticks_trained": 10000,
+  "rolling_window_ticks": 30,
+  "high_conviction_r2_threshold": 0.35,
+  "mean_r_squared": 0.4247,
+  "high_conviction_directional_accuracy_pct": 72.4,
+  "calibrated_wave_parameters": {
+    "wave10_london_ny_overlap_boost": 1.25,
+    "wave19_atr_sl_multiplier": 1.8,
+    "wave19_atr_tp_multiplier": 2.7,
+    "wave23_max_london_spread_pips": 3.5,
+    "wave34_trailing_trigger_pips": 15.0,
+    "wave34_trailing_step_pips": 10.0,
+    "wave48_watermark_drawdown_limit_pct": 2.0
+  },
+  "training_latency_sec": 0.017
+}
