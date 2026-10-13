@@ -1998,8 +1998,6 @@ class MT5LiveTrader:
                     if is_news:
                         msg = f"NEWS BUFFER: skipping entry at {news_time_str} UTC"
                         logger.info(msg)
-                        sys.stdout.write(msg + "\n")
-                        sys.stdout.flush()
                         self._save_state()
                         return
 
@@ -2007,8 +2005,6 @@ class MT5LiveTrader:
                     if self.check_volatility_spike():
                         msg = "VOLATILITY SPIKE: skipping entry"
                         logger.info(msg)
-                        sys.stdout.write(msg + "\n")
-                        sys.stdout.flush()
                         self._save_state()
                         return
 
@@ -2016,8 +2012,6 @@ class MT5LiveTrader:
                     if self.check_rollover_time(now_utc):
                         msg = "ROLLOVER TIME: skipping entry"
                         logger.info(msg)
-                        sys.stdout.write(msg + "\n")
-                        sys.stdout.flush()
                         self._save_state()
                         return
 
@@ -2026,8 +2020,6 @@ class MT5LiveTrader:
                         lot_size = 0.01
                         msg = "PROFIT LOCK: reducing lot to minimum"
                         logger.info(msg)
-                        sys.stdout.write(msg + "\n")
-                        sys.stdout.flush()
 
                     # Spread filter verification
                     spread_ok, reason = self.check_spread_filter()
