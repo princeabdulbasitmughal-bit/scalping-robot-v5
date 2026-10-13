@@ -207,6 +207,8 @@ def start_trader():
         '--iterations', '999999', '--interval', '0.5'
     ]
     log(f"[TRADER] Starting -- cmd: {' '.join(cmd)}")
+    out = None
+    err = None
     try:
         out = open(TRADER_OUT, 'w', encoding='utf-8', errors='replace')
         err = open(TRADER_ERR, 'w', encoding='utf-8', errors='replace')
@@ -221,6 +223,16 @@ def start_trader():
         return p, out, err
     except Exception as e:
         log(f'[TRADER] Start FAILED: {e}')
+        if out is not None:
+            try:
+                out.close()
+            except Exception:
+                pass
+        if err is not None:
+            try:
+                err.close()
+            except Exception:
+                pass
         return None, None, None
 
 
@@ -230,6 +242,8 @@ def start_uvicorn():
         '--host', '0.0.0.0', '--port', str(PORT), '--log-level', 'warning'
     ]
     log(f"[UVICORN] Starting -- cmd: {' '.join(cmd)}")
+    out = None
+    err = None
     try:
         out = open(UVICORN_OUT, 'w', encoding='utf-8', errors='replace')
         err = open(UVICORN_ERR, 'w', encoding='utf-8', errors='replace')
@@ -244,6 +258,16 @@ def start_uvicorn():
         return p, out, err
     except Exception as e:
         log(f'[UVICORN] Start FAILED: {e}')
+        if out is not None:
+            try:
+                out.close()
+            except Exception:
+                pass
+        if err is not None:
+            try:
+                err.close()
+            except Exception:
+                pass
         return None, None, None
 
 
@@ -341,6 +365,7 @@ class WatchdogRunner:
         self.restart_count: int = 0
         self.last_restart_time: float = time.time()
         self.cycle: int = 0
+        self.uv_consecutive_restarts: int = 0
 
     def _memory_check(self, proc=None) -> float:
         """Use psutil if available, check process memory in MB."""
@@ -420,12 +445,16 @@ class WatchdogRunner:
         return self.tr_p, self.tr_out, self.tr_err
 
     def restart_uvicorn(self, reason: str = "process exited / crashed") -> Tuple[Any, Any, Any]:
-        """Restart uvicorn process."""
-        log_restart("Uvicorn", reason, 0, 3)
+        """Restart uvicorn process with exponential backoff."""
+        self.uv_consecutive_restarts += 1
+        backoff_sec = min(300, 3 * (2 ** (self.uv_consecutive_restarts - 1)))
+        log_restart("Uvicorn", reason, self.uv_consecutive_restarts, backoff_sec)
         safe_kill(self.uv_p)
         safe_close(self.uv_out)
         safe_close(self.uv_err)
-        time.sleep(3)
+        if backoff_sec > 3:
+            log(f"[BACKOFF] Sleeping {backoff_sec}s before starting Uvicorn (consecutive={self.uv_consecutive_restarts})...")
+        time.sleep(backoff_sec)
         self.uv_p, self.uv_out, self.uv_err = start_uvicorn()
         return self.uv_p, self.uv_out, self.uv_err
 

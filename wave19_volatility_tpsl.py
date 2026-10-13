@@ -108,7 +108,7 @@ class VolatilityTPSLAdjuster:
             return tp_adj, sl_adj
 
         except Exception as e:
-            logger.debug(f"[VOL TPSL] Error: {e} — using base values")
+            logger.warning(f"[VOL TPSL] Error: {e} — using base values")
             return base_tp_pips, base_sl_pips
 
 

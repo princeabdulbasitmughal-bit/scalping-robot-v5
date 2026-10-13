@@ -40,7 +40,7 @@ class ProfitOptimizer:
         Loss streak ≥ 5 → 0.01 minimum (ultra conservative)
         """
         if self._loss_streak >= 5:
-            return 0.01  # absolute minimum — return raw value, not multiplier
+            return 0.10  # ultra-conservative multiplier (10% of base lot)
         elif self._loss_streak >= 3:
             return 0.5
         elif self._win_streak >= 3:

@@ -106,8 +106,10 @@ class AutoTuner:
 
     def _save_config(self, cfg: dict):
         try:
-            with open(self.config_path, "w") as f:
+            tmp_path = self.config_path + ".tmp"
+            with open(tmp_path, "w") as f:
                 json.dump(cfg, f, indent=2)
+            os.replace(tmp_path, self.config_path)
             logger.info(f"[TUNER] Config saved to {self.config_path}")
         except Exception as e:
             logger.error(f"[TUNER] Could not save config: {e}")
@@ -145,7 +147,7 @@ class AutoTuner:
 
         avg_win = _mean(wins) if wins else 0.0
         avg_loss = _mean(losses) if losses else 0.0
-        avg_rr = abs(avg_win / avg_loss) if avg_loss != 0 else 0.0
+        avg_rr = abs(avg_win / avg_loss) if abs(avg_loss) > 1e-9 else 0.0
 
         # Duration
         durations = [float(t.get("duration_sec", 0)) for t in trades if t.get("duration_sec")]
@@ -168,7 +170,6 @@ class AutoTuner:
                 consec = 0
 
         suggestions = []
-        cfg = self._load_config()
         proposed = dict(cfg)
         changed = False
 

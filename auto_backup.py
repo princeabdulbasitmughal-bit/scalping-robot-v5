@@ -63,33 +63,42 @@ logger = logging.getLogger("AutoBackup")
 # ── Single-instance lock ──────────────────────────────────────────────────────
 def _acquire_instance_lock() -> bool:
     """
-    Write our PID to backup.lock.  If the lock file already exists and the PID
-    inside is still running, return False (another daemon is alive).
+    Atomically acquire the instance lock using O_CREAT|O_EXCL.
+    This is the only race-free pattern on both POSIX and Windows NTFS.
     Returns True when we successfully own the lock.
     """
-    import psutil as _ps  # soft dependency — skip locking if psutil unavailable
     try:
-        if os.path.exists(_LOCK_FILE):
-            try:
-                with open(_LOCK_FILE) as f:
-                    old_pid = int(f.read().strip())
-                if _ps.pid_exists(old_pid):
-                    return False          # other instance is alive
-            except Exception:
-                pass                      # stale / corrupt lock — overwrite it
-        with open(_LOCK_FILE, "w") as f:
-            f.write(str(os.getpid()))
-        return True
-    except ImportError:
-        # psutil not installed; skip duplicate-detection but still write PID
+        # O_CREAT|O_EXCL is atomic — raises FileExistsError if lock already held
+        fd = os.open(_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         try:
-            with open(_LOCK_FILE, "w") as f:
-                f.write(str(os.getpid()))
-        except Exception:
-            pass
+            os.write(fd, str(os.getpid()).encode())
+        finally:
+            os.close(fd)
         return True
-    except Exception:
-        return True   # if we can't create the lock, proceed anyway
+    except FileExistsError:
+        # Lock file exists — check if owning PID is still alive
+        try:
+            import psutil as _ps
+            with open(_LOCK_FILE) as f:
+                old_pid = int(f.read().strip())
+            if _ps.pid_exists(old_pid):
+                return False          # other instance is alive
+            # Stale lock — remove and retry once
+            os.remove(_LOCK_FILE)
+            return _acquire_instance_lock()
+        except (ValueError, OSError):
+            # Stale / corrupt / unreadable lock — remove and retry
+            try:
+                os.remove(_LOCK_FILE)
+                return _acquire_instance_lock()
+            except Exception:
+                return False  # conservative: assume another instance is alive
+        except ImportError:
+            # psutil not installed — conservative: block if lock exists
+            return False
+    except Exception as e:
+        logger.warning(f"Could not acquire instance lock ({e}); proceeding without lock.")
+        return True   # if we can't create the lock file at all, proceed
 
 
 def _release_instance_lock():
@@ -125,6 +134,8 @@ def cleanup_old_backups(backups_dir=BACKUPS_DIR, keep_last=MAX_BACKUPS_TO_KEEP):
 
         for item in os.listdir(backups_dir):
             item_path = os.path.join(backups_dir, item)
+            if not os.path.isfile(item_path):
+                continue  # Skip subdirectories — only track backup files
             match = ts_pattern.search(item)
             if match:
                 ts = match.group(1)
@@ -200,8 +211,11 @@ def run_git_sync(repo_dir=REPO_DIR, timestamp=""):
             logger.info(f"git commit stdout: {res_commit.stdout.strip()}")
         if res_commit.stderr.strip():
             logger.warning(f"git commit stderr: {res_commit.stderr.strip()}")
-        # rc==1 means "nothing to commit" — that's OK, don't abort
-        if res_commit.returncode not in (0, 1):
+        # rc==1 with "nothing to commit" is OK; rc==1 from a pre-commit hook failure is not
+        if res_commit.returncode == 1 and "nothing to commit" in res_commit.stdout.lower():
+            logger.info("git commit: nothing to commit — skipping push.")
+            return
+        elif res_commit.returncode not in (0,):
             logger.error(f"git commit FAILED (rc={res_commit.returncode}). Aborting git sync.")
             return
 
@@ -226,6 +240,16 @@ def run_git_sync(repo_dir=REPO_DIR, timestamp=""):
         logger.info("Git synchronization completed successfully.")
     except subprocess.TimeoutExpired as e:
         logger.error(f"Git command timed out after 30 s: {e}")
+        # On Windows, kill the entire process tree to avoid orphaned git subprocesses
+        # (SSH, credential helpers) that would block the next git push
+        try:
+            if hasattr(e, 'process') and e.process is not None:
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(e.process.pid)],
+                    timeout=5, capture_output=True
+                )
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"Error during git sync: {e}", exc_info=True)
 

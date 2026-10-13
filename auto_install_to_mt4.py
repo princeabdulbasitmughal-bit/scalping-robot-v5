@@ -8,10 +8,12 @@ import os
 import sys
 import shutil
 import glob
+import string
+from pathlib import Path
 
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-EXPERTS_SRC = os.path.join(CURRENT_DIR, "Scalping Robot V5", "MQL4", "Experts")
-PRESETS_SRC = os.path.join(CURRENT_DIR, "Presets")
+CURRENT_DIR = Path(__file__).resolve().parent
+EXPERTS_SRC = CURRENT_DIR / "Scalping Robot V5" / "MQL4" / "Experts"
+PRESETS_SRC = CURRENT_DIR / "Presets"
 
 def find_mt4_directories():
     found = []
@@ -25,10 +27,20 @@ def find_mt4_directories():
                     mql4_dir = os.path.join(full_path, "MQL4")
                     if os.path.exists(mql4_dir):
                         found.append(full_path)
-    prog_files = [r"C:\Program Files", r"C:\Program Files (x86)", r"E:\MetaTrader"]
+    # Use environment variables for Program Files paths (locale-safe)
+    prog_files = [
+        os.environ.get("PROGRAMFILES", r"C:\Program Files"),
+        os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"),
+    ]
+    # Dynamically probe all available drive letters — avoids hardcoding E:\MetaTrader
+    for drive in string.ascii_uppercase:
+        candidate = f"{drive}:\\MetaTrader"
+        prog_files.append(candidate)
     for base in prog_files:
-        if os.path.exists(base):
-            for candidate in glob.glob(os.path.join(base, "*MetaTrader*", "MQL4")):
+        if base and os.path.exists(base):
+            # Escape base path to handle directory names containing brackets ([])
+            safe_base = glob.escape(base)
+            for candidate in glob.glob(os.path.join(safe_base, "*MetaTrader*", "MQL4")):
                 parent = os.path.dirname(candidate)
                 if parent not in found:
                     found.append(parent)
@@ -49,7 +61,12 @@ def install_to_target(target_dir):
     errors = []
 
     if os.path.exists(EXPERTS_SRC):
-        for f in os.listdir(EXPERTS_SRC):
+        try:
+            expert_files = os.listdir(EXPERTS_SRC)
+        except PermissionError as e:
+            errors.append(f"  [ERROR] Cannot list EXPERTS_SRC: {e}")
+            expert_files = []
+        for f in expert_files:
             # Case-insensitive extension check
             if f.lower().endswith(".ex4") or f.lower().endswith(".mq4"):
                 src = os.path.join(EXPERTS_SRC, f)
@@ -63,7 +80,12 @@ def install_to_target(target_dir):
                     errors.append(f"  [ERROR] Failed to copy {f} -> Experts: {e}")
 
     if os.path.exists(PRESETS_SRC):
-        for f in os.listdir(PRESETS_SRC):
+        try:
+            preset_files = os.listdir(PRESETS_SRC)
+        except PermissionError as e:
+            errors.append(f"  [ERROR] Cannot list PRESETS_SRC: {e}")
+            preset_files = []
+        for f in preset_files:
             if f.lower().endswith(".set"):
                 src = os.path.join(PRESETS_SRC, f)
                 dst = os.path.join(mql4_presets, f)
@@ -85,19 +107,22 @@ def main():
     print("="*70)
     print("  SCALPING ROBOT V5 UNIVERSAL METATRADER INSTALLER")
     print("="*70)
-    
+
     if len(sys.argv) > 1:
         custom_path = sys.argv[1].strip('"')
         if os.path.exists(custom_path):
             print(f"Installing to specified directory: {custom_path}")
             installed = install_to_target(custom_path)
-            print(f"Successfully installed {len(installed)} files!")
-            for item in installed:
-                print(f"  [OK] {item}")
+            if installed:
+                print(f"Successfully installed {len(installed)} files!")
+                for item in installed:
+                    print(f"  [OK] {item}")
+            else:
+                print("[WARNING] No files were installed. Check errors above.")
             return
         else:
             print(f"Specified path not found: {custom_path}")
-            
+
     targets = find_mt4_directories()
     if not targets:
         print("[INFO] No active MetaTrader 4 data folders found automatically in AppData.")
@@ -109,14 +134,17 @@ def main():
         print("  2. Click File -> Open Data Folder")
         print("  3. Copy the path and pass it to this installer.")
         return
-        
+
     print(f"Found {len(targets)} MetaTrader installation(s):")
     for idx, t in enumerate(targets):
         print(f"  [{idx+1}] {t}")
         installed = install_to_target(t)
-        for item in installed:
-            print(f"      [OK] Installed {item}")
-            
+        if installed:
+            for item in installed:
+                print(f"      [OK] Installed {item}")
+        else:
+            print(f"  [WARNING] No files installed to {t} — check errors above.")
+
     print("\nInstallation Complete! Next Steps in MT4:")
     print("1. Restart or refresh MetaTrader 4 Navigator window (Right click -> Refresh).")
     print("2. In Tools -> Options -> Expert Advisors, check:")

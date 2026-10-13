@@ -50,6 +50,8 @@ class TickVolumeFilter:
     # ------------------------------------------------------------------
     def get_tick_rate(self) -> float:
         """Returns ticks-per-second rate over the rolling window."""
+        if self._window_sec <= 0:
+            return 0.0
         now = time.time()
         cutoff = now - self._window_sec
         recent = sum(1 for t in self._tick_times if t >= cutoff)

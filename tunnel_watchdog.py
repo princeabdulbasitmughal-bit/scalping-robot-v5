@@ -90,6 +90,8 @@ def set_tunnel_url(url: str):
 
 def start_tunnel():
     log('Starting serveo.net tunnel on port 8899 (ssh -R 80:localhost:8899 serveo.net)...')
+    out = None
+    err = None
     try:
         out = open(TUNNEL_OUT, 'w', encoding='utf-8', errors='replace')
         err = open(TUNNEL_ERR, 'w', encoding='utf-8', errors='replace')
@@ -104,6 +106,16 @@ def start_tunnel():
         return p, out, err
     except Exception as e:
         log(f'ERROR starting tunnel: {e}')
+        if out is not None:
+            try:
+                out.close()
+            except Exception:
+                pass
+        if err is not None:
+            try:
+                err.close()
+            except Exception:
+                pass
         return None, None, None
 
 
@@ -184,6 +196,7 @@ if __name__ == '__main__':
     log('=== TUNNEL WATCHDOG STARTED ===')
     p, out, err = start_tunnel()
     current_url = wait_for_url(15)
+    _fail_count = 0  # consecutive failed reconnects — used for exponential backoff
 
     if current_url:
         set_tunnel_url(current_url)
@@ -197,18 +210,21 @@ if __name__ == '__main__':
             alive = is_tunnel_alive(p)
 
             if not alive:
-                log('Tunnel dropped or expired! Reconnecting within 60s...')
+                _fail_count += 1
+                backoff_sec = min(300, 15 * (2 ** (_fail_count - 1)))
+                log(f'Tunnel dropped or expired! Reconnecting in {backoff_sec}s (attempt #{_fail_count})...')
                 safe_kill(p)
                 safe_close(out)
                 safe_close(err)
                 current_url = None  # Clear stale URL — prevents false-alive on next check
-                time.sleep(2)
+                time.sleep(backoff_sec)
                 p, out, err = start_tunnel()
                 new_url = wait_for_url(15)
                 if new_url:
                     log(f'[ROTATION] NEW URL: {new_url}' if new_url != current_url else f'Reconnected URL: {new_url}')
                     current_url = new_url
                     set_tunnel_url(new_url)
+                    _fail_count = 0  # Reset backoff on successful reconnect
                 else:
                     log('Reconnect attempted but URL not yet available — will retry next cycle')
             else:
@@ -222,6 +238,7 @@ if __name__ == '__main__':
                         # Ensure live_status.json and tunnel_url.txt stay in sync
                         update_live_status(current_url)
                         log(f'Alive: {current_url}')
+                    _fail_count = 0  # Reset backoff when tunnel is healthy
         except KeyboardInterrupt:
             log('Stopped by user.')
             safe_kill(p)

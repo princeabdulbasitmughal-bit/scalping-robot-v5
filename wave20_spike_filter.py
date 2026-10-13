@@ -44,6 +44,7 @@ class SpikeFilter:
         self._recent_changes: deque = deque(maxlen=lookback)
         self._spike_timestamps: deque = deque(maxlen=20)
         self._blocked_until: float = 0.0
+        self._last_seen_price: float = 0.0
 
     def check(self, current_price: float, prev_price: float, closes: list = None):
         """
@@ -98,8 +99,8 @@ class SpikeFilter:
             return True, "OK"
 
         except Exception as e:
-            logger.debug(f"[SPIKE FILTER] Error: {e}")
-            return True, "OK"  # Fail-open: don't block on errors
+            logger.warning(f"[SPIKE FILTER] Error: {e} — blocking entry (fail-closed)")
+            return False, "SPIKE_FILTER_ERROR"
 
     def update(self, current_price: float, prev_price: float = None):
         """Alias for check() taking either (current_price, prev_price) or single price."""

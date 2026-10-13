@@ -43,8 +43,8 @@ class NewsGuard:
                     self._cached_avoid = False
                     self._cached_reason = "manual override active"
                     return
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[NEWS GUARD] Override file parse error: {e}")
 
         # Read news_status.json
         try:

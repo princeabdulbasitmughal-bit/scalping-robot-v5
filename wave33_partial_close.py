@@ -88,7 +88,7 @@ class PartialCloseManager:
                     )
                     return True
         except Exception as exc:
-            logger.debug(f"[WAVE33] check_position error: {exc}")
+            logger.warning(f"[WAVE33] check_position error: {exc}")
         return False
 
     # ─────────────────────────────────────────────────────────────
@@ -103,8 +103,8 @@ class PartialCloseManager:
         try:
             with self._lock:
                 self._closed_tickets.discard(ticket)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"[WAVE33] reset_ticket error for {ticket}: {exc}")
 
     # ─────────────────────────────────────────────────────────────
     def info(self) -> dict:
@@ -118,7 +118,8 @@ class PartialCloseManager:
                     "total_pips_locked_approx": round(self._total_pips_locked, 2),
                     "tracked_tickets": len(self._closed_tickets),
                 }
-        except Exception:
+        except Exception as exc:
+            logger.warning(f"[WAVE33] info() error: {exc}")
             return {}
 
 
