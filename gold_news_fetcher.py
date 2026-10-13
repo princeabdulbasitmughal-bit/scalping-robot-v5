@@ -26,19 +26,27 @@ HIGH_IMPACT_KEYWORDS = [
     'jobs', 'nfp', 'non-farm', 'fomc', 'cpi', 'gdp', 'war',
     'crisis', 'recession', 'unemployment', 'payroll', 'powell',
     'treasury', 'dollar', 'dxy', 'sanctions', 'conflict',
-    # Removed bare 'fed', 'rate' — too many false positives (matched 'forward', 'moderate', etc.)
+    # 'fed' is safe to include with whole-word \b boundary matching
+    # (\bfed\b won't match 'forward', 'modified', 'unified', etc.)
+    'fed',
 ]
 
 # Compile keyword patterns as whole-word matches to avoid false positives
-# e.g. 'rate' won't match 'moderate', 'war' won't match 'forward'
+# e.g. '\bfed\b' won't match 'forward', '\bwar\b' won't match 'award'
 _KW_PATTERNS = [
     re.compile(rf"\b{re.escape(kw)}\b", re.IGNORECASE) for kw in HIGH_IMPACT_KEYWORDS
 ]
 
+# Feed list is ordered by priority; fetcher continues to next on failure.
+# All feeds are on the finance.yahoo.com domain which is confirmed reachable.
+# The Dow Jones / MarketWatch endpoint was confirmed dead (connection refused).
 RSS_FEEDS = [
+    # Primary: GC=F (Gold Futures) headlines — confirmed working
     'https://feeds.finance.yahoo.com/rss/2.0/headline?s=GC%3DF&region=US&lang=en-US',
-    # Kitco RSS was returning 404; replaced with MarketWatch metals feed
-    'https://feeds.content.dowjones.io/public/rss/mw_realtimeheadline',
+    # Secondary: Yahoo Finance general news (broad macro/geopolitical coverage)
+    'https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EGSPC&region=US&lang=en-US',
+    # Tertiary: Yahoo Finance US Dollar Index (DXY) — relevant USD/gold correlation
+    'https://feeds.finance.yahoo.com/rss/2.0/headline?s=DX%3DF&region=US&lang=en-US',
 ]
 
 HEADERS = {'User-Agent': 'Mozilla/5.0 (compatible; GoldBot/1.0)'}
