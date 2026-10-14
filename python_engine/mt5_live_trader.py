@@ -1627,6 +1627,28 @@ class MT5LiveTrader:
                     self.trading_halted = False
                     logger.info(f"[DAILY RESET] Circuit breaker cleared. Balance=${self.balance:,.2f}")
 
+            # ── Check for Manual Reset Trigger file (e.g. from /api/reset-daily-pnl) ──
+            manual_reset_file = Path(self.config.get("base_dir", "E:/scalping-robot-v5")) / "RESET_TRIGGER"
+            if manual_reset_file.exists():
+                try:
+                    self.daily_pnl = 0.0
+                    self.daily_loss = 0.0
+                    self.daily_losses = 0
+                    self.consecutive_losses = 0
+                    self._cb_pause_until = 0.0
+                    self._cooling_down_until = 0.0
+                    self._circuit_breaker_fired = False
+                    self.trading_halted = False
+                    if self.risk_guard is not None:
+                        try:
+                            self.risk_guard.reset_daily_loss()
+                        except Exception:
+                            pass
+                    manual_reset_file.unlink(missing_ok=True)
+                    logger.info("[MANUAL RESET] Successfully applied RESET_TRIGGER. Circuit breaker cleared & trading resumed.")
+                except Exception as mr_err:
+                    logger.warning(f"[MANUAL RESET] Error processing RESET_TRIGGER: {mr_err}")
+
             # ── Read all thresholds from config (never hardcoded) ─────────────────────
             max_daily_loss = float(self.config.get("max_daily_loss_usd", 200.0))
             min_balance    = float(self.config.get("min_balance_usd", 9700.0))

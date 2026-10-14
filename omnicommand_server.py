@@ -1102,12 +1102,23 @@ def reset_daily_pnl(_auth: None = Security(_require_api_key)):
 
         # 2. Apply the reset fields
         now_iso = datetime.now(timezone.utc).isoformat() + "Z"
+        live["trader_status"]         = "ACTIVE_SCALPING"
         live["daily_pnl"]             = 0.0
         live["daily_loss"]            = 0.0
         live["circuit_breaker_fired"] = False
         live["circuit_breaker_active"] = False
         live["trading_halted"]        = False
         live["updated_at"]            = now_iso
+        if "risk_guard" in live and isinstance(live["risk_guard"], dict):
+            live["risk_guard"]["daily_loss_halted"] = False
+            live["risk_guard"]["daily_pnl"] = 0.0
+
+        # Also signal the background live trader loop via RESET_TRIGGER file
+        try:
+            trigger_file = BASE_DIR / "RESET_TRIGGER"
+            trigger_file.write_text("RESET", encoding="utf-8")
+        except Exception as trig_exc:
+            log.warning("reset-daily-pnl: could not create RESET_TRIGGER: %s", trig_exc)
 
         # Also reset risk_state.json for RiskGuard
         risk_state_file = BASE_DIR / "risk_state.json"
