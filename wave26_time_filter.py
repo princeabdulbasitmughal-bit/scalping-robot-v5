@@ -18,6 +18,7 @@ keyword detection (wave21).
 """
 from __future__ import annotations
 import datetime
+import threading
 from datetime import timezone
 import logging
 from typing import Tuple
@@ -62,6 +63,8 @@ class TimeFilter:
         self._block_after    = block_after
         self._total_blocks   = 0
         self._last_block_reason: str = ""
+        self._was_blocked: bool = False  # track state for counter state-transition
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------ #
     #  Public API                                                           #
@@ -72,30 +75,36 @@ class TimeFilter:
         Returns (True, "") if trading is allowed, or
         (False, reason) if it is inside a blocked window.
         """
-        if now_utc is None:
-            now_utc = datetime.datetime.now(timezone.utc)
+        with self._lock:
+            if now_utc is None:
+                now_utc = datetime.datetime.now(timezone.utc)
 
-        now_minutes = now_utc.hour * 60 + now_utc.minute
+            now_minutes = now_utc.hour * 60 + now_utc.minute
 
-        for (rh, rm) in self._release_times:
-            release_minutes = rh * 60 + rm
-            # Circular diff: handles midnight rollover correctly
-            raw_diff = now_minutes - release_minutes
-            diff = (raw_diff + 720) % 1440 - 720  # range [-720, +720]
+            for (rh, rm) in self._release_times:
+                release_minutes = rh * 60 + rm
+                # Circular diff: handles midnight rollover correctly
+                raw_diff = now_minutes - release_minutes
+                diff = (raw_diff + 720) % 1440 - 720  # range [-720, +720]
 
-            if -self._block_before <= diff <= self._block_after:
-                direction = "before" if diff < 0 else "after"
-                release_label = f"{rh:02d}:{rm:02d} UTC"
-                reason = (
-                    f"TIME_FILTER: {abs(diff)}m {direction} major release "
-                    f"at {release_label} — trading blocked"
-                )
-                self._total_blocks += 1
-                self._last_block_reason = reason
-                logger.warning("[WAVE26] %s", reason)
-                return False, reason
+                if -self._block_before <= diff <= self._block_after:
+                    direction = "before" if diff < 0 else "after"
+                    release_label = f"{rh:02d}:{rm:02d} UTC"
+                    reason = (
+                        f"TIME_FILTER: {abs(diff)}m {direction} major release "
+                        f"at {release_label} — trading blocked"
+                    )
+                    # Only increment counter on state transition (entering block)
+                    if not self._was_blocked:
+                        self._total_blocks += 1
+                        self._was_blocked = True
+                        logger.warning("[WAVE26] %s", reason)
+                    self._last_block_reason = reason
+                    return False, reason
 
-        return True, ""
+            # Not in any blocked window
+            self._was_blocked = False
+            return True, ""
 
     def info(self) -> dict:
         """Return status dict for live_status.json."""

@@ -18,7 +18,9 @@ Default parameters (conservative):
   min_ticks_in_dir = 3  (3 out of 5 ticks must move in signal direction)
 """
 from __future__ import annotations
+import math
 import logging
+import threading
 from collections import deque
 from typing import Tuple
 
@@ -44,6 +46,7 @@ class MomentumConfirmation:
         self._min_ticks_in_dir  = min_ticks_in_dir
         self._price_buffer: deque[float] = deque(maxlen=lookback + 1)
         self._total_rejections: int = 0
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------ #
     #  Public API                                                           #
@@ -51,7 +54,10 @@ class MomentumConfirmation:
 
     def update_price(self, price: float) -> None:
         """Push the latest tick price into the buffer."""
-        self._price_buffer.append(float(price))
+        if not math.isfinite(price):
+            return
+        with self._lock:
+            self._price_buffer.append(float(price))
 
     def is_momentum_confirmed(self, signal: str) -> Tuple[bool, str]:
         """
@@ -63,7 +69,8 @@ class MomentumConfirmation:
         if signal not in ("BUY", "SELL"):
             return True, ""  # HOLD or unknown — not our concern
 
-        prices = list(self._price_buffer)
+        with self._lock:
+            prices = list(self._price_buffer)
         # FIX: if not enough ticks to ever meet min_ticks_in_dir, allow trade (insufficient data)
         if len(prices) <= self._min_ticks_in_dir:
             return True, "MOMENTUM: insufficient tick data — allowing"
@@ -99,7 +106,8 @@ class MomentumConfirmation:
 
     def info(self) -> dict:
         """Return status dict for live_status.json."""
-        prices = list(self._price_buffer)
+        with self._lock:
+            prices = list(self._price_buffer)
         if len(prices) >= 2:
             up_ticks   = sum(1 for i in range(1, len(prices)) if prices[i] >= prices[i - 1])
             down_ticks = sum(1 for i in range(1, len(prices)) if prices[i] <= prices[i - 1])

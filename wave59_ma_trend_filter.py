@@ -14,7 +14,9 @@ API:
     ma_trend_filter.info() -> dict
 """
 
+import math
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,7 @@ class MATrendFilter:
         self._seed_prices: list = []
         self._warmed_up: bool = False
         self._last_price: float = 0.0
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Feed API
@@ -63,18 +66,21 @@ class MATrendFilter:
     def update(self, price: float) -> None:
         """Feed each tick price."""
         try:
-            self._last_price = price
-            self._tick_count += 1
+            if not math.isfinite(price):
+                return
+            with self._lock:
+                self._last_price = price
+                self._tick_count += 1
 
-            if not self._warmed_up:
-                self._seed_prices.append(price)
-                if len(self._seed_prices) >= self.period:
-                    # Seed EMA with SMA of first `period` prices
-                    self._ema = sum(self._seed_prices) / len(self._seed_prices)
-                    self._warmed_up = True
-                    self._seed_prices = []  # free memory
-            else:
-                self._ema = self.alpha * price + (1 - self.alpha) * self._ema
+                if not self._warmed_up:
+                    self._seed_prices.append(price)
+                    if len(self._seed_prices) >= self.period:
+                        # Seed EMA with SMA of first `period` prices
+                        self._ema = sum(self._seed_prices) / len(self._seed_prices)
+                        self._warmed_up = True
+                        self._seed_prices = []  # free memory
+                else:
+                    self._ema = self.alpha * price + (1 - self.alpha) * self._ema
         except Exception as exc:
             logger.debug(f"[WAVE59] update error: {exc}")
 
@@ -83,7 +89,8 @@ class MATrendFilter:
     # ------------------------------------------------------------------
 
     def get_ema(self) -> float:
-        return self._ema
+        with self._lock:
+            return self._ema
 
     def is_signal_blocked(self, signal: str):
         """
@@ -91,19 +98,21 @@ class MATrendFilter:
         During warm-up period (<50 ticks), never blocks.
         """
         try:
-            if not self._warmed_up or self._ema == 0.0:
-                return BlockResult(False, "warmup_or_zero_ema")
+            sig = (signal or "").strip().upper()
+            with self._lock:
+                if not self._warmed_up or self._ema == 0.0:
+                    return BlockResult(False, "warmup_or_zero_ema")
 
-            price = self._last_price
-            ema = self._ema
+                price = self._last_price
+                ema = self._ema
 
-            if signal == "BUY" and price < ema:
+            if sig == "BUY" and price < ema:
                 logger.info(
                     f"[WAVE59] MA TREND BLOCK: BUY rejected — price {price:.3f} "
                     f"< EMA50 {ema:.3f} (bearish trend)"
                 )
                 return BlockResult(True, "price_below_ema")
-            if signal == "SELL" and price > ema:
+            if sig == "SELL" and price > ema:
                 logger.info(
                     f"[WAVE59] MA TREND BLOCK: SELL rejected — price {price:.3f} "
                     f"> EMA50 {ema:.3f} (bullish trend)"
@@ -112,7 +121,7 @@ class MATrendFilter:
             return BlockResult(False, "trend_aligned")
         except Exception as exc:
             logger.debug(f"[WAVE59] is_signal_blocked error: {exc}")
-            return BlockResult(False, f"error:{exc}")
+            return BlockResult(True, f"error:{exc}")  # fail-closed
 
     # ------------------------------------------------------------------
     # Info API
@@ -120,17 +129,22 @@ class MATrendFilter:
 
     def info(self) -> dict:
         try:
+            with self._lock:
+                warmed = self._warmed_up
+                ema = self._ema
+                price = self._last_price
+                tick_count = self._tick_count
             trend = "NEUTRAL"
-            if self._warmed_up and self._ema > 0:
-                trend = "BULLISH" if self._last_price > self._ema else "BEARISH"
+            if warmed and ema > 0:
+                trend = "BULLISH" if price > ema else "BEARISH"
             return {
                 "wave": 59,
                 "name": "MATrendFilter",
-                "ema50": round(self._ema, 3) if self._ema else None,
-                "last_price": round(self._last_price, 3),
+                "ema50": round(ema, 3) if ema else None,
+                "last_price": round(price, 3),
                 "trend": trend,
-                "warmed_up": self._warmed_up,
-                "tick_count": self._tick_count,
+                "warmed_up": warmed,
+                "tick_count": tick_count,
             }
         except Exception:
             return {"wave": 59, "error": "info_failed"}

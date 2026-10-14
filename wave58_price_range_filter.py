@@ -12,7 +12,9 @@ API:
     price_range_filter.info() -> dict
 """
 
+import math
 import logging
+import threading
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -30,11 +32,12 @@ class PriceRangeFilter:
     def __init__(self, min_range_pips: float = _DEFAULT_MIN_RANGE_PIPS,
                  pip_value: float = _PIP):
         self.min_range_pips = min_range_pips
-        self.pip_value = pip_value
+        self.pip_value = max(pip_value, 1e-6)  # guard against zero pip_value
         self._day_high: float = 0.0
         self._day_low: float = float('inf')
         self._last_day: int = -1
         self._ticks_today: int = 0
+        self._lock = threading.Lock()
 
     def _maybe_reset_day(self) -> None:
         """Reset high/low at UTC midnight."""
@@ -52,12 +55,15 @@ class PriceRangeFilter:
     def update(self, price: float) -> None:
         """Call each tick with latest price."""
         try:
-            self._maybe_reset_day()
-            if price > self._day_high:
-                self._day_high = price
-            if price < self._day_low:
-                self._day_low = price
-            self._ticks_today += 1
+            if not math.isfinite(price):
+                return
+            with self._lock:
+                self._maybe_reset_day()
+                if price > self._day_high:
+                    self._day_high = price
+                if price < self._day_low:
+                    self._day_low = price
+                self._ticks_today += 1
         except Exception as exc:
             logger.debug(f"[WAVE58] update error: {exc}")
 
@@ -68,29 +74,35 @@ class PriceRangeFilter:
     def get_range_pips(self) -> float:
         """Current intraday range in pips."""
         try:
-            if self._day_high == 0.0 or self._day_low == float('inf'):
-                return 0.0
-            return (self._day_high - self._day_low) / self.pip_value
+            with self._lock:
+                self._maybe_reset_day()
+                if self._day_high == 0.0 or self._day_low == float('inf'):
+                    return 0.0
+                return (self._day_high - self._day_low) / self.pip_value
         except Exception:
             return 0.0
 
     def is_entry_blocked(self) -> bool:
         """Returns True if the daily range is too small to trade."""
         try:
-            # Need at least 50 ticks before judging the market as flat
-            if self._ticks_today < 50:
+            with self._lock:
+                self._maybe_reset_day()
+                # Need at least 50 ticks before judging the market as flat
+                if self._ticks_today < 50:
+                    return False
+                if self._day_high == 0.0 or self._day_low == float('inf'):
+                    return False
+                range_pips = (self._day_high - self._day_low) / self.pip_value
+                if range_pips < self.min_range_pips:
+                    logger.info(
+                        f"[WAVE58] FLAT MARKET: daily range {range_pips:.2f} pips "
+                        f"< min {self.min_range_pips:.1f} pips -> ENTRY BLOCKED"
+                    )
+                    return True
                 return False
-            range_pips = self.get_range_pips()
-            if range_pips < self.min_range_pips:
-                logger.info(
-                    f"[WAVE58] FLAT MARKET: daily range {range_pips:.2f} pips "
-                    f"< min {self.min_range_pips:.1f} pips -> ENTRY BLOCKED"
-                )
-                return True
-            return False
         except Exception as exc:
             logger.debug(f"[WAVE58] is_entry_blocked error: {exc}")
-            return False
+            return True  # fail-closed
 
     # ------------------------------------------------------------------
     # Info API
@@ -98,16 +110,24 @@ class PriceRangeFilter:
 
     def info(self) -> dict:
         try:
-            return {
-                "wave": 58,
-                "name": "PriceRangeFilter",
-                "day_high": round(self._day_high, 3) if self._day_high > 0 else None,
-                "day_low": round(self._day_low, 3) if self._day_low < float('inf') else None,
-                "range_pips": round(self.get_range_pips(), 2),
-                "min_range_pips": self.min_range_pips,
-                "entry_blocked": self.is_entry_blocked(),
-                "ticks_today": self._ticks_today,
-            }
+            with self._lock:
+                self._maybe_reset_day()
+                if self._day_high > 0 and self._day_low < float('inf'):
+                    range_pips = round((self._day_high - self._day_low) / self.pip_value, 2)
+                else:
+                    range_pips = 0.0
+                return {
+                    "wave": 58,
+                    "name": "PriceRangeFilter",
+                    "day_high": round(self._day_high, 3) if self._day_high > 0 else None,
+                    "day_low": round(self._day_low, 3) if self._day_low < float('inf') else None,
+                    "range_pips": range_pips,
+                    "min_range_pips": self.min_range_pips,
+                    "entry_blocked": (
+                        self._ticks_today >= 50 and range_pips < self.min_range_pips
+                    ),
+                    "ticks_today": self._ticks_today,
+                }
         except Exception:
             return {"wave": 58, "error": "info_failed"}
 

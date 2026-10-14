@@ -5,6 +5,7 @@ trail the SL by TRAIL_PIPS behind the current price.
 Returns new SL price each tick so the caller can update it.
 """
 
+import math
 import logging
 from threading import Lock
 

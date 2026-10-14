@@ -9,7 +9,9 @@ Logic:
   - Provides a suggested signal override and confidence score (0.0–1.0)
 """
 
+import math
 import time
+import threading
 from collections import deque
 
 
@@ -37,34 +39,39 @@ class ReversalDetector:
         self._last_signal_time: float = 0.0
         self._total_reversals: int = 0
         self._created_at: float = time.time()
+        self._lock = threading.Lock()
 
     def _compute_rsi(self) -> float:
         """Simple Wilder RSI from stored price series."""
         prices = list(self._prices)
-        if len(prices) < 2:
+        # Cold-start guard: need at least period+1 prices for meaningful RSI
+        if len(prices) <= self._rsi_period:
             return 50.0
         gains, losses = [], []
         for i in range(1, len(prices)):
             delta = prices[i] - prices[i - 1]
             (gains if delta > 0 else losses).append(abs(delta))
         # Use period as denominator (Wilder: average over full period, not just non-zero bars)
-        period = self._rsi_period
+        period = max(1, self._rsi_period)
         avg_gain = sum(gains) / period
         avg_loss = sum(losses) / period
         if avg_loss == 0:
-            return 100.0
+            return 50.0 if avg_gain == 0 else 100.0
         rs = avg_gain / avg_loss
         return 100.0 - (100.0 / (1.0 + rs))
 
     def update(self, price: float, rsi: float = None) -> None:
         """Push latest price tick and optional RSI."""
-        self._prices.append(float(price))
-        if rsi is not None:
-            self._rsi_history.append(float(rsi))
-        else:
-            self._rsi_history.append(self._compute_rsi())
-        self._price_highs.append(float(price))
-        self._price_lows.append(float(price))
+        if not math.isfinite(price):
+            return
+        with self._lock:
+            self._prices.append(float(price))
+            if rsi is not None:
+                self._rsi_history.append(float(rsi))
+            else:
+                self._rsi_history.append(self._compute_rsi())
+            self._price_highs.append(float(price))
+            self._price_lows.append(float(price))
 
     def update_price(self, price: float) -> None:
         """Push latest price tick and refresh RSI."""
@@ -75,69 +82,71 @@ class ReversalDetector:
         Returns (signal: str, confidence: float, reason: str).
         signal is 'BUY', 'SELL', or 'HOLD'.
         """
-        now = time.time()
-        if now - self._last_signal_time < self._cooldown:
-            return ("HOLD", 0.0, "cooldown_active")
+        with self._lock:
+            now = time.time()
+            if now - self._last_signal_time < self._cooldown:
+                return ("HOLD", 0.0, "cooldown_active")
 
-        rsi_vals = list(self._rsi_history)
-        highs = list(self._price_highs)
-        lows = list(self._price_lows)
+            rsi_vals = list(self._rsi_history)
+            highs = list(self._price_highs)
+            lows = list(self._price_lows)
 
-        if len(rsi_vals) < 3 or len(highs) < 3:
-            return ("HOLD", 0.0, "insufficient_data")
+            if len(rsi_vals) < 3 or len(highs) < 3:
+                return ("HOLD", 0.0, "insufficient_data")
 
-        latest_rsi = rsi_vals[-1]
-        prev_rsi = rsi_vals[-2]
-        latest_high = highs[-1]
-        prev_high = highs[-2]
-        latest_low = lows[-1]
-        prev_low = lows[-2]
+            latest_rsi = rsi_vals[-1]
+            prev_rsi = rsi_vals[-2]
+            latest_high = highs[-1]
+            prev_high = highs[-2]
+            latest_low = lows[-1]
+            prev_low = lows[-2]
 
-        # Bearish divergence: price higher high but RSI lower high (overbought zone)
-        if latest_rsi > self._overbought and latest_high > prev_high and latest_rsi < prev_rsi:
-            confidence = min((latest_rsi - self._overbought) / 25.0, 1.0)
-            self._last_signal = "SELL"
-            self._last_signal_time = now
-            self._total_reversals += 1
-            return ("SELL", round(confidence, 3), "bearish_divergence_overbought")
+            # Bearish divergence: price higher high but RSI lower high (overbought zone)
+            if latest_rsi > self._overbought and latest_high > prev_high and latest_rsi < prev_rsi:
+                confidence = min((latest_rsi - self._overbought) / 25.0, 1.0)
+                self._last_signal = "SELL"
+                self._last_signal_time = now
+                self._total_reversals += 1
+                return ("SELL", round(confidence, 3), "bearish_divergence_overbought")
 
-        # Bullish divergence: price lower low but RSI higher low (oversold zone)
-        if latest_rsi < self._oversold and latest_low < prev_low and latest_rsi > prev_rsi:
-            confidence = min((self._oversold - latest_rsi) / 25.0, 1.0)
-            self._last_signal = "BUY"
-            self._last_signal_time = now
-            self._total_reversals += 1
-            return ("BUY", round(confidence, 3), "bullish_divergence_oversold")
+            # Bullish divergence: price lower low but RSI higher low (oversold zone)
+            if latest_rsi < self._oversold and latest_low < prev_low and latest_rsi > prev_rsi:
+                confidence = min((self._oversold - latest_rsi) / 25.0, 1.0)
+                self._last_signal = "BUY"
+                self._last_signal_time = now
+                self._total_reversals += 1
+                return ("BUY", round(confidence, 3), "bullish_divergence_oversold")
 
-        # Extreme levels without divergence (lower confidence)
-        # FIX: update _last_signal_time here too, to prevent signal spam every tick
-        if latest_rsi > self._overbought:
-            confidence = min((latest_rsi - self._overbought) / 50.0, 0.5)
-            self._last_signal = "SELL"
-            self._last_signal_time = now
-            self._total_reversals += 1
-            return ("SELL", round(confidence, 3), "overbought_extreme")
-        if latest_rsi < self._oversold:
-            confidence = min((self._oversold - latest_rsi) / 50.0, 0.5)
-            self._last_signal = "BUY"
-            self._last_signal_time = now
-            self._total_reversals += 1
-            return ("BUY", round(confidence, 3), "oversold_extreme")
+            # Extreme levels without divergence (lower confidence)
+            # FIX: update _last_signal_time here too, to prevent signal spam every tick
+            if latest_rsi > self._overbought:
+                confidence = min((latest_rsi - self._overbought) / 50.0, 0.5)
+                self._last_signal = "SELL"
+                self._last_signal_time = now
+                self._total_reversals += 1
+                return ("SELL", round(confidence, 3), "overbought_extreme")
+            if latest_rsi < self._oversold:
+                confidence = min((self._oversold - latest_rsi) / 50.0, 0.5)
+                self._last_signal = "BUY"
+                self._last_signal_time = now
+                self._total_reversals += 1
+                return ("BUY", round(confidence, 3), "oversold_extreme")
 
-        return ("HOLD", 0.0, "no_reversal_condition")
+            return ("HOLD", 0.0, "no_reversal_condition")
 
     def info(self) -> dict:
-        rsi_vals = list(self._rsi_history)
-        current_rsi = rsi_vals[-1] if rsi_vals else 50.0
-        return {
-            "current_rsi": round(current_rsi, 2),
-            "overbought_threshold": self._overbought,
-            "oversold_threshold": self._oversold,
-            "last_signal": self._last_signal,
-            "total_reversals": self._total_reversals,
-            "cooldown_sec": self._cooldown,
-            "buffer_size": len(self._prices),
-        }
+        with self._lock:
+            rsi_vals = list(self._rsi_history)
+            current_rsi = rsi_vals[-1] if rsi_vals else 50.0
+            return {
+                "current_rsi": round(current_rsi, 2),
+                "overbought_threshold": self._overbought,
+                "oversold_threshold": self._oversold,
+                "last_signal": self._last_signal,
+                "total_reversals": self._total_reversals,
+                "cooldown_sec": self._cooldown,
+                "buffer_size": len(self._prices),
+            }
 
 
 # Module-level singleton

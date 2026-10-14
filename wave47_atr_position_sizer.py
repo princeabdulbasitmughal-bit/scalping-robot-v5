@@ -5,6 +5,7 @@ High ATR -> wider SL/TP; Low ATR -> tighter SL/TP.
 Baseline: sl_pips=30, tp_pips=45.  ATR ratio scales proportionally.
 """
 
+import math
 from collections import deque
 import threading
 import time
@@ -36,20 +37,29 @@ class ATRPositionSizer:
     # ------------------------------------------------------------------
     def update(self, high: float, low: float, close: float = None) -> None:
         """Feed each tick/bar H/L/C to keep ATR current."""
-        if close is None:
-            close = (high + low) / 2.0
-        with self._lock:
-            self._highs.append(high)
-            self._lows.append(low)
-            self._closes.append(close)
-            if len(self._closes) >= 2:
-                self._atr = self._compute_atr()
-                self._atr_history.append(self._atr)
-                # update rolling baseline (median of last 50 ATR readings)
-                if len(self._atr_history) >= 5:
-                    sorted_h = sorted(self._atr_history)
-                    self._atr_baseline = sorted_h[len(sorted_h) // 2]
-            self._last_update = time.time()
+        try:
+            high = float(high)
+            low = float(low)
+            if not (math.isfinite(high) and math.isfinite(low)):
+                return
+            if close is None:
+                close = (high + low) / 2.0
+            elif not math.isfinite(close):
+                close = (high + low) / 2.0
+            with self._lock:
+                self._highs.append(high)
+                self._lows.append(low)
+                self._closes.append(close)
+                if len(self._closes) >= 2:
+                    self._atr = self._compute_atr()
+                    self._atr_history.append(self._atr)
+                    # update rolling baseline (median of last 50 ATR readings)
+                    if len(self._atr_history) >= 5:
+                        sorted_h = sorted(self._atr_history)
+                        self._atr_baseline = sorted_h[len(sorted_h) // 2]
+                self._last_update = time.time()
+        except Exception:
+            pass
 
     def _compute_atr(self) -> float:
         highs  = list(self._highs)
@@ -60,7 +70,7 @@ class ATRPositionSizer:
             return self._atr or 1.0
         trs = []
         for i in range(1, n + 1):
-            if i >= len(highs):
+            if i > len(highs):  # FIX: was >= (off-by-one)
                 break
             h = highs[-i]
             l = lows[-i]
@@ -77,7 +87,7 @@ class ATRPositionSizer:
         with self._lock:
             atr = self._atr
             baseline = self._atr_baseline
-        if atr <= 0 or baseline <= 0:
+        if not math.isfinite(atr) or not math.isfinite(baseline) or atr <= 0 or baseline <= 0:
             return base_sl, base_tp
         ratio = atr / baseline
         # clamp ratio to [0.5, 2.0] to avoid extreme outliers

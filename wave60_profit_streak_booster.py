@@ -13,6 +13,7 @@ API:
 """
 
 import logging
+import threading
 from collections import deque
 
 logger = logging.getLogger(__name__)

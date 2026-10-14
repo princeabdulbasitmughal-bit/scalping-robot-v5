@@ -17,6 +17,7 @@ longer cooldown when the market is genuinely choppy.
 from __future__ import annotations
 import time
 import logging
+import threading
 from collections import deque
 from typing import Tuple
 
@@ -47,6 +48,7 @@ class CorrelationGuard:
         self._signal_times: deque[float] = deque(maxlen=50)
         self._blocked_until: float       = 0.0
         self._total_triggers: int        = 0
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------ #
     #  Public API                                                           #
@@ -58,37 +60,40 @@ class CorrelationGuard:
         whether it eventually passes all other gates).
         """
         now = time.monotonic()
-        self._signal_times.append(now)
-        self._maybe_trigger_cooldown(now)
+        with self._lock:
+            self._signal_times.append(now)
+            self._maybe_trigger_cooldown(now)
 
     def is_trading_allowed(self) -> Tuple[bool, str]:
         """
         Returns (True, "") if clear, or (False, reason) if in cooldown.
         """
         now = time.monotonic()
-        if now < self._blocked_until:
-            remaining = round(self._blocked_until - now, 1)
-            reason = (
-                f"CORR_GUARD: choppy market cooldown active ({remaining}s remaining)"
-            )
-            return False, reason
-        return True, ""
+        with self._lock:
+            if now < self._blocked_until:
+                remaining = round(self._blocked_until - now, 1)
+                reason = (
+                    f"CORR_GUARD: choppy market cooldown active ({remaining}s remaining)"
+                )
+                return False, reason
+            return True, ""
 
     def info(self) -> dict:
         """Return status dict for live_status.json."""
         now = time.monotonic()
-        in_cooldown = now < self._blocked_until
-        # Count recent signals in window
-        cutoff = now - self._window_sec
-        recent = sum(1 for t in self._signal_times if t >= cutoff)
-        return {
-            "in_cooldown": in_cooldown,
-            "cooldown_remaining_sec": round(max(self._blocked_until - now, 0.0), 1),
-            "signals_in_window": recent,
-            "window_sec": self._window_sec,
-            "max_signals": self._max_signals,
-            "total_triggers": self._total_triggers,
-        }
+        with self._lock:
+            in_cooldown = now < self._blocked_until
+            # Count recent signals in window
+            cutoff = now - self._window_sec
+            recent = sum(1 for t in self._signal_times if t >= cutoff)
+            return {
+                "in_cooldown": in_cooldown,
+                "cooldown_remaining_sec": round(max(self._blocked_until - now, 0.0), 1),
+                "signals_in_window": recent,
+                "window_sec": self._window_sec,
+                "max_signals": self._max_signals,
+                "total_triggers": self._total_triggers,
+            }
 
     # ------------------------------------------------------------------ #
     #  Internal helpers                                                     #

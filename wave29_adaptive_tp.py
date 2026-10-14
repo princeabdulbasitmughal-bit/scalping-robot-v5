@@ -7,7 +7,9 @@ Dynamically scales the TP target based on recent price volatility (ATR proxy).
 - Cold-start (ATR=0.0)     -> neutral (1.0x) until buffer fills
 """
 
+import math
 import time
+import threading
 from collections import deque
 
 
@@ -34,11 +36,15 @@ class AdaptiveTp:
         self._last_multiplier: float = 1.0
         self._total_adjustments: int = 0
         self._created_at: float = time.time()
+        self._lock = threading.Lock()
 
     def update_price(self, price: float) -> None:
         """Feed latest tick price into the ATR buffer."""
-        self._prices.append(float(price))
-        self._recalculate_atr()
+        if not math.isfinite(price):
+            return
+        with self._lock:
+            self._prices.append(float(price))
+            self._recalculate_atr()
 
     def _recalculate_atr(self) -> None:
         """Compute simple ATR proxy = mean of abs tick-to-tick ranges."""
@@ -54,23 +60,24 @@ class AdaptiveTp:
         Returns a multiplier for the base TP pips.
         > 1.0 → extend TP  |  < 1.0 → shrink TP  |  1.0 → unchanged
 
-        Cold-start: when ATR=0.0 (buffer not yet filled) return 1.0 (neutral)
+        Cold-start: when buffer not yet filled return 1.0 (neutral)
         to avoid immediately shrinking TP on the very first trade.
         """
-        # Cold-start guard: ATR=0 means no data yet → stay neutral
-        if self._current_atr == 0.0:
-            mult = 1.0
-        elif self._current_atr >= self._atr_high:
-            mult = self._extend_ratio
-        elif self._current_atr <= self._atr_low:
-            mult = self._shrink_ratio
-        else:
-            mult = 1.0
+        with self._lock:
+            # Cold-start guard: buffer not filled → stay neutral
+            if len(self._prices) < self._window:
+                mult = 1.0
+            elif self._current_atr >= self._atr_high:
+                mult = self._extend_ratio
+            elif self._current_atr <= self._atr_low:
+                mult = self._shrink_ratio
+            else:
+                mult = 1.0
 
-        if mult != self._last_multiplier:
-            self._total_adjustments += 1
-        self._last_multiplier = mult
-        return mult
+            if mult != self._last_multiplier:
+                self._total_adjustments += 1
+            self._last_multiplier = mult
+            return mult
 
     def adjust_tp(self, base_tp_pips: float) -> float:
         """Return adjusted TP pips. Never shrinks below min_tp_pips unless
@@ -83,19 +90,20 @@ class AdaptiveTp:
         return adjusted
 
     def info(self) -> dict:
-        return {
-            "current_atr": round(self._current_atr, 5),
-            "tp_multiplier": round(self._last_multiplier, 3),
-            "mode": (
-                "EXTEND" if self._last_multiplier > 1.0 else
-                "SHRINK" if self._last_multiplier < 1.0 else
-                "NEUTRAL"
-            ),
-            "total_adjustments": self._total_adjustments,
-            "buffer_size": len(self._prices),
-            "atr_high_threshold": self._atr_high,
-            "atr_low_threshold": self._atr_low,
-        }
+        with self._lock:
+            return {
+                "current_atr": round(self._current_atr, 5),
+                "tp_multiplier": round(self._last_multiplier, 3),
+                "mode": (
+                    "EXTEND" if self._last_multiplier > 1.0 else
+                    "SHRINK" if self._last_multiplier < 1.0 else
+                    "NEUTRAL"
+                ),
+                "total_adjustments": self._total_adjustments,
+                "buffer_size": len(self._prices),
+                "atr_high_threshold": self._atr_high,
+                "atr_low_threshold": self._atr_low,
+            }
 
 
 # Module-level singleton
@@ -106,4 +114,3 @@ adaptive_tp = AdaptiveTp(
     atr_high_threshold=0.15,
     atr_low_threshold=0.04,
 )
-
