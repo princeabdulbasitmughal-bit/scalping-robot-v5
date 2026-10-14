@@ -55,6 +55,12 @@ class TrailingStopManager:
         """
         try:
             with self._lock:
+                # NaN guard: any non-finite input → skip
+                if not (math.isfinite(entry_price) and math.isfinite(current_price) and math.isfinite(current_sl)):
+                    return None
+                if pip_size <= 0:
+                    pip_size = 0.1  # default XAUUSD
+
                 trail_price = self.trail_pips * pip_size
                 trigger_price = self.profit_trigger_pips * pip_size
 

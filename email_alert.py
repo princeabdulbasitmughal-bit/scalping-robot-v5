@@ -60,6 +60,17 @@ class EmailAlerter:
         with self._lock:
             self.config = self._load_config()
 
+    def _make_smtp(self, smtp_host, smtp_port, timeout=15):
+        """Create SMTP connection — uses SMTP_SSL for port 465, STARTTLS for others."""
+        if int(smtp_port) == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=timeout)
+            server.ehlo()
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=timeout)
+            server.ehlo()
+            server.starttls()
+        return server
+
     def send_alert(self, subject, body):
         """Send email alert. Returns True on success, False on failure."""
         self._reload_config()
@@ -84,9 +95,7 @@ class EmailAlerter:
             msg.attach(MIMEText(full_body, 'plain'))
             smtp_host = cfg.get('smtp_host', 'smtp.gmail.com')
             smtp_port = cfg.get('smtp_port', 587)
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-                server.ehlo()
-                server.starttls()
+            with self._make_smtp(smtp_host, smtp_port, timeout=15) as server:
                 server.login(from_email, password)
                 server.send_message(msg)
             email_log.info("Alert sent: %s -> %s", subject, to_email)
@@ -96,16 +105,18 @@ class EmailAlerter:
             return False
 
     def test_connection(self):
-        """Test SMTP connection. Returns True if successful."""
+        """Test SMTP connection including authentication. Returns True if successful."""
         self._reload_config()
         with self._lock:
             cfg = dict(self.config)
         try:
             smtp_host = cfg.get('smtp_host', 'smtp.gmail.com')
             smtp_port = cfg.get('smtp_port', 587)
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-                server.ehlo()
-                server.starttls()
+            from_email = cfg.get('from_email', '')
+            password = cfg.get('password', '')
+            with self._make_smtp(smtp_host, smtp_port, timeout=10) as server:
+                if from_email and password:
+                    server.login(from_email, password)
             email_log.info("SMTP connection test PASSED: %s:%s", smtp_host, smtp_port)
             return True
         except Exception as e:

@@ -154,7 +154,7 @@ class Backtester:
         return 100.0 - (100.0 / (1.0 + rs))
 
     def _calc_bb(self, series: List[float], period: int = 20, std_dev_mult: float = 2.0) -> Tuple[float, float, float]:
-        if len(series) < period:
+        if not series or period <= 0 or len(series) < period:
             p = series[-1] if series else 0.0
             return p + 1.0, p, p - 1.0
         slice_vals = series[-period:]
@@ -268,6 +268,13 @@ class Backtester:
         history_prices = [round(start_price + random.gauss(0, 0.02), 3) for _ in range(warmup_len)]
 
         ticks = self.simulate_ticks(n_ticks=n_ticks, start_price=history_prices[-1], session=session)
+
+        if not ticks:
+            return {
+                "total_trades": 0, "wins": 0, "losses": 0, "total_pnl": 0.0,
+                "max_drawdown": 0.0, "win_rate": 0.0, "initial_balance": initial_balance,
+                "final_balance": initial_balance, "profit_factor": 0.0, "trades": []
+            }
 
         balance = initial_balance
         equity = initial_balance
@@ -457,7 +464,7 @@ class Backtester:
         gross_profit = sum(float(t.get("pnl", 0.0)) for t in winning_trades)
         gross_loss = abs(sum(float(t.get("pnl", 0.0)) for t in losing_trades))
         profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (999.0 if gross_profit > 0 else 0.0)
-        return_pct = round((total_pnl / initial_balance) * 100.0, 2)
+        return_pct = round((total_pnl / initial_balance) * 100.0, 2) if initial_balance > 0 else 0.0
         avg_spread = round(sum(spreads) / max(1, len(spreads)), 2)
 
         results = {
@@ -535,7 +542,9 @@ class Backtester:
             curr_price = float(current_bar.get("close", 0.0))
             high_price = float(current_bar.get("high", curr_price))
             low_price = float(current_bar.get("low", curr_price))
-            if curr_price <= 0.0:
+            if not math.isfinite(curr_price) or curr_price <= 0.0:
+                continue
+            if not (math.isfinite(high_price) and math.isfinite(low_price)):
                 continue
 
             # 1. Manage open trades
@@ -691,14 +700,14 @@ class Backtester:
         win_rate = (len(winning_trades) / len(trades) * 100.0) if trades else 0.0
         gross_profit = sum(float(t.get("pnl", 0.0)) for t in winning_trades)
         gross_loss = abs(sum(float(t.get("pnl", 0.0)) for t in losing_trades))
-        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 999.0
+        profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (999.0 if gross_profit > 0 else 0.0)
 
         results = {
             "initial_balance": initial_balance,
             "final_balance": round(balance, 2),
             "net_profit": round(total_pnl, 2),
             "total_pnl": round(total_pnl, 2),
-            "return_pct": round((total_pnl / initial_balance) * 100.0, 2),
+            "return_pct": round((total_pnl / initial_balance) * 100.0, 2) if initial_balance > 0 else 0.0,
             "total_trades": len(trades),
             "wins": len(winning_trades),
             "winning_trades": len(winning_trades),

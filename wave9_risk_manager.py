@@ -8,12 +8,17 @@ Features:
   - Trade frequency governor (max trades per time window)
   - Profit lock (reduce position size after hitting 50% of daily target)
 """
+import math
 import time
 import collections
 import json
+import logging
 import os
+import threading
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 
 class RiskManager:
@@ -38,31 +43,42 @@ class RiskManager:
         self._soft_halt_until: float = 0.0  # epoch time
         self._hard_halt: bool = False
 
-        # Session P&L log
-        self._session_pnl_log: List[float] = []
+        # Session P&L log — bounded to prevent unbounded growth
+        self._session_pnl_log: collections.deque = collections.deque(maxlen=1000)
+
+        self._lock = threading.Lock()
 
     # ── Equity Curve EMA Update ──────────────────────────────────────────────
     def update_equity(self, equity: float):
         """Call every tick. Updates EMA of equity for curve filter."""
-        self._equity_history.append(equity)
-        if self._equity_ema == 0.0:
-            self._equity_ema = equity
-        else:
-            self._equity_ema = equity * self._eq_alpha + self._equity_ema * (1 - self._eq_alpha)
-        if equity > self.peak_balance:
-            self.peak_balance = equity
+        try:
+            equity = float(equity)
+            if not math.isfinite(equity) or equity <= 0:
+                return
+            with self._lock:
+                self._equity_history.append(equity)
+                if self._equity_ema == 0.0:
+                    self._equity_ema = equity
+                else:
+                    self._equity_ema = equity * self._eq_alpha + self._equity_ema * (1 - self._eq_alpha)
+                if equity > self.peak_balance:
+                    self.peak_balance = equity
+        except Exception as e:
+            logger.error(f"[W9-Risk] update_equity error: {e}")
 
     def equity_curve_ok(self, equity: float) -> bool:
         """Return False if equity dropped below its 20-period EMA — stop trading."""
-        if len(self._equity_history) < 5:
-            return True  # not enough data yet
-        return equity >= self._equity_ema * 0.995  # 0.5% tolerance band
+        with self._lock:
+            if len(self._equity_history) < 5:
+                return True  # not enough data yet
+            return equity >= self._equity_ema * 0.995  # 0.5% tolerance band
 
     # ── Drawdown Guard ────────────────────────────────────────────────────────
     def drawdown_pct(self, balance: float) -> float:
-        if self.peak_balance <= 0:
-            return 0.0
-        return round((self.peak_balance - balance) / self.peak_balance * 100, 2)
+        with self._lock:
+            if self.peak_balance <= 0:
+                return 0.0
+            return round((self.peak_balance - balance) / self.peak_balance * 100, 2)
 
     def drawdown_lot_scale(self, balance: float) -> float:
         """Return lot multiplier based on drawdown tier."""
@@ -93,13 +109,15 @@ class RiskManager:
     def can_trade_frequency(self) -> bool:
         """Enforce max trades per hour sliding window."""
         now = time.time()
-        # Remove trades older than 1 hour
-        while self._trade_times and now - self._trade_times[0] > 3600:
-            self._trade_times.popleft()
-        return len(self._trade_times) < self.max_trades_per_hour
+        with self._lock:
+            # Remove trades older than 1 hour
+            while self._trade_times and now - self._trade_times[0] > 3600:
+                self._trade_times.popleft()
+            return len(self._trade_times) < self.max_trades_per_hour
 
     def record_trade(self):
-        self._trade_times.append(time.time())
+        with self._lock:
+            self._trade_times.append(time.time())
 
     # ── Daily P&L Scaling ────────────────────────────────────────────────────
     def daily_loss_lot_scale(self, daily_loss: float) -> float:
@@ -179,25 +197,34 @@ class RiskManager:
                 "soft_halt_until": self._soft_halt_until,
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
-            with open(path, "w") as f:
+            tmp_path = path + ".tmp"
+            with open(tmp_path, "w") as f:
                 json.dump(state, f, indent=2)
-        except Exception:
-            pass
+            os.replace(tmp_path, path)
+        except Exception as e:
+            logger.error(f"[W9-Risk] save_state failed: {e}")
 
     def load_state(self, path: str = None):
         if path is None:
             import pathlib
             path = str(pathlib.Path(__file__).resolve().parent / "risk_state.json")
         try:
-            if os.path.exists(path):
-                with open(path) as f:
-                    state = json.load(f)
-                self.peak_balance = float(state.get("peak_balance", self.peak_balance))
-                self._equity_ema = float(state.get("equity_ema", 0.0))
-                self._hard_halt = bool(state.get("hard_halt", False))
-                self._soft_halt_until = float(state.get("soft_halt_until", 0.0))
-        except Exception:
-            pass
+            if not os.path.exists(path):
+                return
+            if os.path.getsize(path) == 0:
+                logger.warning(f"[W9-Risk] load_state: file is empty: {path}")
+                return
+            with open(path) as f:
+                state = json.load(f)
+            if not isinstance(state, dict):
+                logger.warning(f"[W9-Risk] load_state: invalid state format in {path}")
+                return
+            self.peak_balance = float(state.get("peak_balance", self.peak_balance))
+            self._equity_ema = float(state.get("equity_ema", 0.0))
+            self._hard_halt = bool(state.get("hard_halt", False))
+            self._soft_halt_until = float(state.get("soft_halt_until", 0.0))
+        except Exception as e:
+            logger.error(f"[W9-Risk] load_state failed: {e}")
 
     def streak_lot_modifier(self) -> float:
         """Returns multiplier for current win/loss streak."""

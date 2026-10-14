@@ -12,8 +12,10 @@ Logic:
 - Advisory: if range not yet built, returns False (no block)
 """
 
+import math
 import time
 import logging
+import threading
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -67,7 +69,9 @@ class OpeningRangeBreakout:
         self._window_complete: bool = False
         self._tick_count: int = 0
         self._last_price: float = 0.0
-        self._last_session_hour: int = -1   # which session hour we last started
+        # Track (year, day_of_year, hour) to correctly reset across multiple days
+        self._last_session_key: tuple = (-1, -1, -1)
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     def _check_session_reset(self):
@@ -79,93 +83,108 @@ class OpeningRangeBreakout:
         now_utc = time.gmtime()
         hour = now_utc.tm_hour
         minute = now_utc.tm_min
+        year = now_utc.tm_year
+        yday = now_utc.tm_yday
 
         is_session_hour = (hour == _LONDON_OPEN_UTC_HOUR or hour == _NY_OPEN_UTC_HOUR)
         within_grace = minute < 15   # first 15 minutes of the hour
 
-        # Reset once per session hour: only when we're inside a session-open
-        # hour AND we haven't already started this hour's window.
-        if is_session_hour and within_grace and hour != self._last_session_hour:
+        # Reset once per session: use (year, yday, hour) so next day's same hour fires again
+        session_key = (year, yday, hour)
+        if is_session_hour and within_grace and session_key != self._last_session_key:
             self._session_start = time.time() - (minute * 60)  # backdate to exact open
             self._or_high = None
             self._or_low = None
             self._in_window = True
             self._window_complete = False
             self._tick_count = 0
-            self._last_session_hour = hour
+            self._last_session_key = session_key
             logger.info(f"[WAVE61] ORB session reset — {hour:02d}:00 UTC session open")
 
     def update(self, price: float):
         """Feed each tick price."""
-        self._last_price = price
-        self._check_session_reset()
-
-        if not self._in_window:
-            return
-
-        # Check if window has expired
-        if self._session_start is not None:
-            elapsed = time.time() - self._session_start
-            if elapsed >= _ORB_WINDOW_SECONDS:
-                self._in_window = False
-                self._window_complete = True
-                logger.info(
-                    f"[WAVE61] ORB window complete — high={self._or_high} low={self._or_low} "
-                    f"ticks={self._tick_count}"
-                )
+        try:
+            if not math.isfinite(price):
                 return
+            with self._lock:
+                self._last_price = price
+                self._check_session_reset()
 
-        # Build the range
-        if self._or_high is None or price > self._or_high:
-            self._or_high = price
-        if self._or_low is None or price < self._or_low:
-            self._or_low = price
-        self._tick_count += 1
+                if not self._in_window:
+                    return
+
+                # Check if window has expired
+                if self._session_start is not None:
+                    elapsed = time.time() - self._session_start
+                    if elapsed >= _ORB_WINDOW_SECONDS:
+                        self._in_window = False
+                        self._window_complete = True
+                        logger.info(
+                            f"[WAVE61] ORB window complete — high={self._or_high} low={self._or_low} "
+                            f"ticks={self._tick_count}"
+                        )
+                        return
+
+                # Build the range
+                if self._or_high is None or price > self._or_high:
+                    self._or_high = price
+                if self._or_low is None or price < self._or_low:
+                    self._or_low = price
+                self._tick_count += 1
+        except Exception as e:
+            logger.debug(f"[WAVE61] update error: {e}")
 
     # ------------------------------------------------------------------
     def is_signal_blocked(self, signal: str):
         """
         Returns BlockResult (behaves as both bool and (blocked, reason) tuple).
         """
-        if not self._window_complete:
-            return BlockResult(False, "window_not_complete")
-        if self._tick_count < _MIN_TICKS:
-            return BlockResult(False, "insufficient_ticks")
-        if self._or_high is None or self._or_low is None:
-            return BlockResult(False, "range_not_established")
+        try:
+            with self._lock:
+                if not self._window_complete:
+                    return BlockResult(False, "window_not_complete")
+                if self._tick_count < _MIN_TICKS:
+                    return BlockResult(False, "insufficient_ticks")
+                if self._or_high is None or self._or_low is None:
+                    return BlockResult(False, "range_not_established")
 
-        price = self._last_price
+                price = self._last_price
 
-        if signal == "BUY" and price <= self._or_high:
-            logger.debug(
-                f"[WAVE61] ORB BUY blocked — price {price:.2f} not above OR_high {self._or_high:.2f}"
-            )
-            return BlockResult(True, "price_not_above_or_high")
+                if signal == "BUY" and price <= self._or_high:
+                    logger.debug(
+                        f"[WAVE61] ORB BUY blocked — price {price:.2f} not above OR_high {self._or_high:.2f}"
+                    )
+                    return BlockResult(True, "price_not_above_or_high")
 
-        if signal == "SELL" and price >= self._or_low:
-            logger.debug(
-                f"[WAVE61] ORB SELL blocked — price {price:.2f} not below OR_low {self._or_low:.2f}"
-            )
-            return BlockResult(True, "price_not_below_or_low")
+                if signal == "SELL" and price >= self._or_low:
+                    logger.debug(
+                        f"[WAVE61] ORB SELL blocked — price {price:.2f} not below OR_low {self._or_low:.2f}"
+                    )
+                    return BlockResult(True, "price_not_below_or_low")
 
-        return BlockResult(False, "breakout_confirmed")
+                return BlockResult(False, "breakout_confirmed")
+        except Exception as e:
+            logger.error(f"[WAVE61] is_signal_blocked error: {e}")
+            return BlockResult(False, "error")
 
     def get_range_pips(self) -> float:
         """Return the opening range size in pips (XAUUSD: 1 pip = 0.01)."""
-        if self._or_high is None or self._or_low is None:
-            return 0.0
-        return round((self._or_high - self._or_low) / 0.01, 1)
+        with self._lock:
+            if self._or_high is None or self._or_low is None:
+                return 0.0
+            return round((self._or_high - self._or_low) / 0.01, 1)
 
     def info(self) -> dict:
-        return {
-            "in_window": self._in_window,
-            "window_complete": self._window_complete,
-            "or_high": self._or_high,
-            "or_low": self._or_low,
-            "range_pips": self.get_range_pips(),
-            "tick_count": self._tick_count,
-            "last_price": self._last_price,
-        }
+        with self._lock:
+            return {
+                "in_window": self._in_window,
+                "window_complete": self._window_complete,
+                "or_high": self._or_high,
+                "or_low": self._or_low,
+                "range_pips": self.get_range_pips(),
+                "tick_count": self._tick_count,
+                "last_price": self._last_price,
+            }
 
 
 # Module-level singleton

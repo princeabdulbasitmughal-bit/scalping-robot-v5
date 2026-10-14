@@ -10,6 +10,7 @@ import json
 import random
 import logging
 import shutil
+import threading
 from pathlib import Path
 from typing import Any, Optional
 
@@ -29,12 +30,12 @@ def atomic_write_json(
     """
     path = Path(file_path).resolve()
     dir_path = path.parent
-    dir_path.mkdir(parents=True, exist_ok=True)
 
-    # Unique temp file in the same directory ensures same filesystem for atomic os.replace
-    temp_path = dir_path / f"{path.name}.tmp.{os.getpid()}.{time.time_ns()}"
+    # Unique temp file: PID + thread ID + nanosecond timestamp prevents collision across threads
+    temp_path = dir_path / f"{path.name}.tmp.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}"
 
     try:
+        dir_path.mkdir(parents=True, exist_ok=True)
         # Write to temporary file first and sync to storage
         content = json.dumps(data, indent=indent, default=str).encode("utf-8")
         with open(temp_path, "wb") as f:

@@ -8,8 +8,10 @@ Default: N=5 consecutive adverse ticks required to trigger a block.
 Block expires after BLOCK_DURATION_SEC seconds (default 30).
 """
 
+import math
 import time
 import logging
+import threading
 from collections import deque
 
 logger = logging.getLogger(__name__)
@@ -38,12 +40,16 @@ class TickReversalGuard:
         self._update_count: int = 0
         self._last_reversal_direction: str = ""
         self._created_at = time.time()
+        self._lock = threading.Lock()
 
     def update(self, price: float):
         """Feed the latest tick price."""
         try:
-            self._prices.append(float(price))
-            self._update_count += 1
+            if not math.isfinite(price):
+                return
+            with self._lock:
+                self._prices.append(float(price))
+                self._update_count += 1
         except Exception as e:
             logger.debug(f"[W53-TickReversal] update error: {e}")
 
@@ -70,62 +76,65 @@ class TickReversalGuard:
         signal: 'BUY' or 'SELL'
         """
         try:
-            now = time.time()
+            signal = str(signal).strip().upper()
+            with self._lock:
+                now = time.time()
 
-            # Cooldown still active
-            if now < self._block_until:
-                remaining = self._block_until - now
-                logger.debug(
-                    f"[W53-TickReversal] {signal} BLOCKED — reversal cooldown "
-                    f"({remaining:.0f}s remaining)"
-                )
-                return True
+                # Cooldown still active
+                if now < self._block_until:
+                    remaining = self._block_until - now
+                    logger.debug(
+                        f"[W53-TickReversal] {signal} BLOCKED — reversal cooldown "
+                        f"({remaining:.0f}s remaining)"
+                    )
+                    return True
 
-            direction = self._consecutive_direction()
+                direction = self._consecutive_direction()
 
-            # BUY into falling market
-            if signal == "BUY" and direction == "DOWN":
-                self._block_until = now + self._block_duration
-                self._block_count += 1
-                self._last_reversal_direction = "DOWN"
-                logger.warning(
-                    f"[W53-TickReversal] BUY BLOCKED — {self._n} consecutive DOWN ticks "
-                    f"(counter-trend). Block for {self._block_duration}s."
-                )
-                return True
+                # BUY into falling market
+                if signal == "BUY" and direction == "DOWN":
+                    self._block_until = now + self._block_duration
+                    self._block_count += 1
+                    self._last_reversal_direction = "DOWN"
+                    logger.warning(
+                        f"[W53-TickReversal] BUY BLOCKED — {self._n} consecutive DOWN ticks "
+                        f"(counter-trend). Block for {self._block_duration}s."
+                    )
+                    return True
 
-            # SELL into rising market
-            if signal == "SELL" and direction == "UP":
-                self._block_until = now + self._block_duration
-                self._block_count += 1
-                self._last_reversal_direction = "UP"
-                logger.warning(
-                    f"[W53-TickReversal] SELL BLOCKED — {self._n} consecutive UP ticks "
-                    f"(counter-trend). Block for {self._block_duration}s."
-                )
-                return True
+                # SELL into rising market
+                if signal == "SELL" and direction == "UP":
+                    self._block_until = now + self._block_duration
+                    self._block_count += 1
+                    self._last_reversal_direction = "UP"
+                    logger.warning(
+                        f"[W53-TickReversal] SELL BLOCKED — {self._n} consecutive UP ticks "
+                        f"(counter-trend). Block for {self._block_duration}s."
+                    )
+                    return True
 
-            return False
+                return False
         except Exception as e:
-            logger.debug(f"[W53-TickReversal] is_signal_blocked error: {e}")
-            return False
+            logger.error(f"[W53-TickReversal] is_signal_blocked error: {e}")
+            return True  # fail-closed
 
     def info(self) -> dict:
         """Return serializable status dict for live_status.json."""
         try:
-            now = time.time()
-            remaining = max(0.0, self._block_until - now)
-            return {
-                "n_ticks": self._n,
-                "block_duration_sec": self._block_duration,
-                "is_blocked": remaining > 0,
-                "block_remaining_sec": round(remaining, 1),
-                "block_count": self._block_count,
-                "last_reversal_direction": self._last_reversal_direction,
-                "current_tick_direction": self._consecutive_direction(),
-                "update_count": self._update_count,
-                "price_buffer_size": len(self._prices),
-            }
+            with self._lock:
+                now = time.time()
+                remaining = max(0.0, self._block_until - now)
+                return {
+                    "n_ticks": self._n,
+                    "block_duration_sec": self._block_duration,
+                    "is_blocked": remaining > 0,
+                    "block_remaining_sec": round(remaining, 1),
+                    "block_count": self._block_count,
+                    "last_reversal_direction": self._last_reversal_direction,
+                    "current_tick_direction": self._consecutive_direction(),
+                    "update_count": self._update_count,
+                    "price_buffer_size": len(self._prices),
+                }
         except Exception:
             return {}
 

@@ -21,7 +21,8 @@ CREATE_NO_WINDOW      = 0x08000000
 
 FLAGS = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
 
-_MAX_BACKOFF_SEC = 120   # Exponential backoff cap for crash loops
+_MAX_BACKOFF_SEC = 120        # Exponential backoff cap for crash loops
+_MAX_CONSECUTIVE_FAILURES = 20  # Circuit breaker: halt after this many consecutive failures
 
 
 def log(msg):
@@ -102,6 +103,14 @@ if __name__ == "__main__":
                 restart_count += 1
                 consecutive_failures += 1
                 log("Watchdog DOWN. Restart #{} (consecutive={})".format(restart_count, consecutive_failures))
+
+                # Circuit breaker: if watchdog keeps failing, stop hammering and alert
+                if consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                    log("CRITICAL: Exceeded {} consecutive failures — supervisor entering 1-hour sleep. Check watchdog_runner.py manually!".format(_MAX_CONSECUTIVE_FAILURES))
+                    time.sleep(3600)
+                    consecutive_failures = 0  # reset after long sleep to allow retry
+                    continue
+
                 start_watchdog()
                 # Exponential backoff: 8s, 16s, 32s … capped at _MAX_BACKOFF_SEC
                 backoff = min(8 * (2 ** (consecutive_failures - 1)), _MAX_BACKOFF_SEC)
