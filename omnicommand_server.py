@@ -18,7 +18,7 @@ try:
     from fastapi import FastAPI, Request, HTTPException, Security
     from fastapi.security import APIKeyHeader
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import JSONResponse, HTMLResponse
+    from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
     from fastapi.exceptions import RequestValidationError
     from starlette.exceptions import HTTPException as StarletteHTTPException
     import uvicorn
@@ -1217,6 +1217,48 @@ def serve_dashboard_v2():
         return HTMLResponse("<h1>dashboard_v2.html not found</h1>", status_code=404)
     except Exception as exc:  # noqa: F841
         return HTMLResponse("<h1>Internal Server Error</h1>", status_code=500)
+
+
+# ---------------------------------------------------------------------------
+# Direct ZIP Download Endpoints for Basit bhai
+# ---------------------------------------------------------------------------
+@app.get("/download/suite")
+@app.get("/download/master")
+@app.get("/download/all")
+def download_master_suite():
+    """Directly download the full Basit AI Master Suite ZIP archive."""
+    p = Path("E:/Basit_AI_Master_Project_Suite.zip")
+    if p.exists():
+        return FileResponse(
+            str(p),
+            media_type="application/zip",
+            filename="Basit_AI_Master_Project_Suite.zip"
+        )
+    raise HTTPException(status_code=404, detail="Master Suite ZIP not found")
+
+
+@app.get("/download/omnitrade")
+def download_omnitrade_zip():
+    p = Path("E:/omnitrade-ai-matrix.zip")
+    if p.exists():
+        return FileResponse(str(p), media_type="application/zip", filename="omnitrade-ai-matrix.zip")
+    raise HTTPException(status_code=404, detail="OmniTrade ZIP not found")
+
+
+@app.get("/download/jarvis")
+def download_jarvis_zip():
+    p = Path("E:/basit-jarvis-ai.zip")
+    if p.exists():
+        return FileResponse(str(p), media_type="application/zip", filename="basit-jarvis-ai.zip")
+    raise HTTPException(status_code=404, detail="Jarvis ZIP not found")
+
+
+@app.get("/download/scalper")
+def download_scalper_zip():
+    p = Path("E:/scalping-robot-v5.zip")
+    if p.exists():
+        return FileResponse(str(p), media_type="application/zip", filename="scalping-robot-v5.zip")
+    raise HTTPException(status_code=404, detail="Scalper Robot ZIP not found")
 
 
 # ---------------------------------------------------------------------------
