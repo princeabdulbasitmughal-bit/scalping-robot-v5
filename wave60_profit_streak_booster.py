@@ -35,6 +35,7 @@ class ProfitStreakBooster:
         # Store last N results (True = win, False = loss)
         self._results: deque = deque(maxlen=streak_length)
         self._total_boosts: int = 0
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Feed API
@@ -43,18 +44,19 @@ class ProfitStreakBooster:
     def record_trade(self, won: bool) -> None:
         """Call at trade close. won=True for profit, False for loss."""
         try:
-            was_in_streak = self.is_in_streak()
-            self._results.append(won)
-            now_in_streak = self.is_in_streak()
+            with self._lock:
+                was_in_streak = len(self._results) >= self.streak_length and all(self._results)
+                self._results.append(won)
+                now_in_streak = len(self._results) >= self.streak_length and all(self._results)
 
-            if now_in_streak and not was_in_streak:
-                self._total_boosts += 1
-                logger.info(
-                    f"[WAVE60] CONFIDENCE MODE ACTIVATED: {self.streak_length} "
-                    f"consecutive wins -> TP x{self.tp_multiplier:.1f}"
-                )
-            elif was_in_streak and not won:
-                logger.info("[WAVE60] Losing trade — confidence mode DEACTIVATED")
+                if now_in_streak and not was_in_streak:
+                    self._total_boosts += 1
+                    logger.info(
+                        f"[WAVE60] CONFIDENCE MODE ACTIVATED: {self.streak_length} "
+                        f"consecutive wins -> TP x{self.tp_multiplier:.1f}"
+                    )
+                elif was_in_streak and not won:
+                    logger.info("[WAVE60] Losing trade — confidence mode DEACTIVATED")
         except Exception as exc:
             logger.debug(f"[WAVE60] record_trade error: {exc}")
 
@@ -65,9 +67,10 @@ class ProfitStreakBooster:
     def is_in_streak(self) -> bool:
         """True if the last `streak_length` trades are all wins."""
         try:
-            if len(self._results) < self.streak_length:
-                return False
-            return all(self._results)
+            with self._lock:
+                if len(self._results) < self.streak_length:
+                    return False
+                return all(self._results)
         except Exception:
             return False
 
@@ -77,7 +80,9 @@ class ProfitStreakBooster:
         otherwise 1.0 (no boost).
         """
         try:
-            if self.is_in_streak():
+            with self._lock:
+                in_streak = len(self._results) >= self.streak_length and all(self._results)
+            if in_streak:
                 logger.debug(
                     f"[WAVE60] TP boost active: x{self.tp_multiplier:.1f}"
                 )
@@ -92,14 +97,18 @@ class ProfitStreakBooster:
 
     def info(self) -> dict:
         try:
+            with self._lock:
+                results_snapshot = list(self._results)
+                in_streak = len(self._results) >= self.streak_length and all(self._results)
+                total_boosts = self._total_boosts
             return {
                 "wave": 60,
                 "name": "ProfitStreakBooster",
                 "streak_length_required": self.streak_length,
-                "recent_results": list(self._results),
-                "in_confidence_mode": self.is_in_streak(),
-                "tp_multiplier": self.get_tp_multiplier(),
-                "total_boosts_activated": self._total_boosts,
+                "recent_results": results_snapshot,
+                "in_confidence_mode": in_streak,
+                "tp_multiplier": self.tp_multiplier if in_streak else 1.0,
+                "total_boosts_activated": total_boosts,
             }
         except Exception:
             return {"wave": 60, "error": "info_failed"}

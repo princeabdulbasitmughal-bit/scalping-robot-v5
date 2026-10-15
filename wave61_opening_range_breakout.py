@@ -176,12 +176,17 @@ class OpeningRangeBreakout:
 
     def info(self) -> dict:
         with self._lock:
+            # Inline get_range_pips — avoids re-acquiring non-reentrant lock (deadlock)
+            if self._or_high is not None and self._or_low is not None:
+                range_pips = round((self._or_high - self._or_low) / 0.01, 1)
+            else:
+                range_pips = 0.0
             return {
                 "in_window": self._in_window,
                 "window_complete": self._window_complete,
                 "or_high": self._or_high,
                 "or_low": self._or_low,
-                "range_pips": self.get_range_pips(),
+                "range_pips": range_pips,
                 "tick_count": self._tick_count,
                 "last_price": self._last_price,
             }

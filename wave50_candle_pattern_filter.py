@@ -11,6 +11,7 @@ Bull Engulf| BULLISH  | blocks SELL
 Bear Engulf| BEARISH  | blocks BUY
 """
 
+import math
 import threading
 import time
 from collections import deque
@@ -30,6 +31,8 @@ class CandlePatternFilter:
     # ------------------------------------------------------------------
     def update(self, price: float) -> None:
         """Feed each tick price."""
+        if not math.isfinite(price):
+            return
         with self._lock:
             self._ticks.append((time.time(), price))
             self._last_update = time.time()
@@ -108,13 +111,14 @@ class CandlePatternFilter:
     # ------------------------------------------------------------------
     def is_signal_blocked(self, signal: str) -> bool:
         """Return True if candle pattern contradicts the proposed signal direction."""
+        sig = str(signal).strip().upper()
         with self._lock:
             bias = self._last_bias
         if bias == "INDECISION":
             return True   # doji — block any entry
-        if signal == "BUY"  and bias == "BEARISH":
+        if sig == "BUY"  and bias == "BEARISH":
             return True
-        if signal == "SELL" and bias == "BULLISH":
+        if sig == "SELL" and bias == "BULLISH":
             return True
         return False
 

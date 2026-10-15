@@ -70,7 +70,7 @@ class BalanceFloorGuard:
         """
         try:
             balance = float(balance)
-            if not math.isfinite(balance) or balance <= 0.0:
+            if not math.isfinite(balance):
                 return
             with self._lock:
                 self._current_balance = balance

@@ -4,6 +4,7 @@ Accumulates total spread cost (in USD) paid across all trades.
 Logs daily spread cost; blocks new entries if single-day spread cost > $50.
 """
 
+import math
 import threading
 import time
 from datetime import datetime, timezone
@@ -34,6 +35,8 @@ class SpreadCostTracker:
     def record_trade(self, spread_pips: float, lot_size: float) -> None:
         """Call after each trade open; spread_pips = entry spread in pips."""
         with self._lock:
+            if not math.isfinite(spread_pips) or not math.isfinite(lot_size) or lot_size <= 0 or spread_pips < 0:
+                return
             self._reset_if_new_day()
             # cost = spread_pips * lot_size * $100 per pip per lot (XAUUSD 0.01 lot = $1/pip)
             cost_usd = spread_pips * (lot_size / 0.01) * _LOT_USD_PER_PIP

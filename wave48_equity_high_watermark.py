@@ -4,6 +4,7 @@ Tracks the all-time equity high watermark.
 If current equity drops > 2% below the watermark -> 30-minute entry block.
 """
 
+import math
 import threading
 import time
 
@@ -29,6 +30,8 @@ class EquityHighWatermark:
     def update(self, equity: float) -> None:
         """Feed current equity each tick."""
         with self._lock:
+            if not math.isfinite(equity) or equity <= 0:
+                return
             self._last_equity = equity
             if equity > self._watermark:
                 self._watermark = equity

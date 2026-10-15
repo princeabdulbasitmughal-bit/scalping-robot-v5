@@ -62,6 +62,9 @@ class SessionPnLTracker:
         Call once per trade close with realized PnL in USD.
         """
         try:
+            import math as _math
+            if not _math.isfinite(pnl):
+                return
             with self._lock:
                 key, session = self._key()
                 prev = self._session_pnl.get(key, 0.0)
@@ -101,7 +104,7 @@ class SessionPnLTracker:
                 return False
         except Exception as e:
             logger.debug(f"[W51-SessionPnL] is_entry_blocked error: {e}")
-            return False
+            return True  # fail-closed
 
     def get_session_pnl(self, session: str = None) -> float:
         """Return PnL for the given session name today (or current session if None)."""

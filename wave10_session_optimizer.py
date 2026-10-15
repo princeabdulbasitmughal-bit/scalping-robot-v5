@@ -91,10 +91,6 @@ class SessionOptimizer:
             session = "OVERLAP"
             quality = "PREMIUM"
             pip_mult = 1.3
-        elif in_london and in_ny:
-            session = "LONDON_NY"
-            quality = "HIGH"
-            pip_mult = 1.15
         elif in_london:
             session = "LONDON"
             quality = "HIGH"
@@ -131,6 +127,8 @@ class SessionOptimizer:
     ) -> Tuple[float, float]:
         """Adjust SL/TP based on session volatility profile."""
         info = self.get_current_session_info()
+        if not info.get("tradeable", False):
+            return (0.0, 0.0)
         mult = info.get("pip_multiplier", 1.0)
         sl = round(base_sl * mult, 1)
         sl = max(15.0, min(70.0, sl))

@@ -77,9 +77,20 @@ class GapGuard:
 
     def info(self) -> dict:
         with self._lock:
-            allowed, reason = self.is_trading_allowed()
-            elapsed = time.monotonic() - self._gap_detected_at if self._gap_detected_at else 0
-            remaining = max(0.0, self._block_duration - elapsed) if self._gap_detected_at else 0.0
+            # Inline is_trading_allowed logic — avoids re-acquiring non-reentrant lock (deadlock)
+            if self._gap_detected_at == 0:
+                allowed, reason = True, "no_gap"
+                elapsed = 0.0
+                remaining = 0.0
+            else:
+                elapsed = time.monotonic() - self._gap_detected_at
+                if elapsed < self._block_duration:
+                    remaining = round(self._block_duration - elapsed, 1)
+                    allowed = False
+                    reason = f"gap_block_{remaining}s_remaining_gap={self._last_gap_pips}pips"
+                else:
+                    allowed, reason = True, "gap_cleared"
+                    remaining = 0.0
             return {
                 "trading_allowed": allowed,
                 "reason": reason,
