@@ -30,11 +30,11 @@ class EquityCurveHalt:
         recovery_win_streak: int = 2,
         cooldown_sec: float = 300.0,
     ):
-        self._window = max(1, int(window))
-        self._loss_threshold = loss_threshold_usd   # sum over window
-        self._slope_threshold = slope_threshold      # avg PnL per trade
-        self._recovery_win_streak = recovery_win_streak
-        self._cooldown_sec = cooldown_sec
+        self._window = max(1, int(window)) if isinstance(window, (int, float)) and not isinstance(window, bool) and window > 0 else 10
+        self._loss_threshold = float(loss_threshold_usd) if isinstance(loss_threshold_usd, (int, float)) and not isinstance(loss_threshold_usd, bool) else -150.0
+        self._slope_threshold = float(slope_threshold) if isinstance(slope_threshold, (int, float)) and not isinstance(slope_threshold, bool) else -10.0
+        self._recovery_win_streak = int(recovery_win_streak) if isinstance(recovery_win_streak, (int, float)) and not isinstance(recovery_win_streak, bool) and recovery_win_streak > 0 else 2
+        self._cooldown_sec = float(cooldown_sec) if isinstance(cooldown_sec, (int, float)) and not isinstance(cooldown_sec, bool) and cooldown_sec >= 0 else 300.0
 
         self._pnl_history: deque = deque(maxlen=self._window)
         self._halted: bool = False
@@ -48,11 +48,12 @@ class EquityCurveHalt:
     # ------------------------------------------------------------------
     def record_trade(self, pnl: float, won: bool) -> None:
         """Call after every closed trade."""
-        if not isinstance(pnl, (int, float)) or not math.isfinite(pnl):
+        if pnl is None or isinstance(pnl, bool) or not isinstance(pnl, (int, float)) or not math.isfinite(pnl):
             return
+        is_win = bool(won)
         with self._lock:
             self._pnl_history.append(float(pnl))
-            if won:
+            if is_win:
                 self._consecutive_wins += 1
             else:
                 self._consecutive_wins = 0
@@ -63,13 +64,13 @@ class EquityCurveHalt:
         Returns (allowed: bool, reason: str).
         Call before each signal evaluation.
         """
-        if not isinstance(current_balance, (int, float)) or not math.isfinite(current_balance):
+        if current_balance is None or isinstance(current_balance, bool) or not isinstance(current_balance, (int, float)) or not math.isfinite(current_balance):
             return False, "EQUITY CURVE HALT: Invalid non-finite balance"
         with self._lock:
             return self._is_trading_allowed_locked(float(current_balance), now_mono=now_mono)
 
     def _is_trading_allowed_locked(self, current_balance: float, now_mono: float = None) -> tuple:
-        cur_mono = time.monotonic() if now_mono is None else float(now_mono)
+        cur_mono = float(now_mono) if (now_mono is not None and not isinstance(now_mono, bool)) else time.monotonic()
         # --- Check recovery if already halted ---
         if self._halted:
             elapsed = cur_mono - self._halt_time

@@ -89,6 +89,7 @@ class SpreadOptimizer:
         """
         if (
             spread_pips is None
+            or isinstance(spread_pips, bool)
             or not isinstance(spread_pips, (int, float))
             or not math.isfinite(spread_pips)
             or spread_pips < 0
@@ -115,7 +116,7 @@ class SpreadOptimizer:
             base_limit = _SESSION_SPREAD_LIMITS.get(session, _DEFAULT_LIMIT)
 
             # Adjust for volatility: high vol → allow slightly wider spread
-            if not isinstance(vol_index, (int, float)) or not math.isfinite(vol_index) or vol_index <= 0:
+            if isinstance(vol_index, bool) or not isinstance(vol_index, (int, float)) or not math.isfinite(vol_index) or vol_index <= 0:
                 safe_vol = 1.0
             else:
                 safe_vol = float(vol_index)
