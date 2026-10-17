@@ -202,6 +202,8 @@ class ScalpingLiveRunner:
         """Return thread-safe snapshot of live runner state."""
         with self._lock:
             return {
+                "symbol": self.robot.config.get("symbol", "XAUUSD"),
+                "running": self.running,
                 "current_price": self.current_price,
                 "balance": round(self.balance, 2),
                 "equity": round(self.equity, 2),
