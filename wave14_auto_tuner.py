@@ -215,7 +215,7 @@ class AutoTuner:
 
         # ── Rule 3: Profit factor > 2.0 → can increase lot slightly ───────
         if profit_factor > 2.0 and win_rate > 55 and n >= 20:
-            new_lot = min(cfg["max_lot_size"], round(cfg["lot_size"] * 1.15, 2))
+            new_lot = min(cfg["max_lot_size"], round(max(cfg["lot_size"] + 0.01, cfg["lot_size"] * 1.15), 2))
             if new_lot > cfg["lot_size"]:
                 suggestions.append(f"Strong profit factor ({profit_factor:.2f}) + win rate ({win_rate:.1f}%) — increase lot from {cfg['lot_size']} to {new_lot}")
                 proposed["lot_size"] = new_lot
