@@ -33,7 +33,7 @@ class EntryCooldown:
         was_win: True if trade was profitable, False otherwise.
         pnl: trade profit/loss in USD (for logging).
         """
-        clean_pnl = float(pnl) if isinstance(pnl, (int, float)) and math.isfinite(pnl) else 0.0
+        clean_pnl = float(pnl) if isinstance(pnl, (int, float)) and not isinstance(pnl, bool) and math.isfinite(pnl) else 0.0
         now = now_ts if now_ts is not None else time.time()
         cooldown = self.COOLDOWN_WIN_SEC if was_win else self.COOLDOWN_LOSS_SEC
 

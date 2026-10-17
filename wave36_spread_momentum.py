@@ -44,6 +44,7 @@ class SpreadMomentumGuard:
         """Feed current spread. Call every tick."""
         if (
             spread_pips is None
+            or isinstance(spread_pips, bool)
             or not isinstance(spread_pips, (int, float))
             or not math.isfinite(spread_pips)
             or spread_pips <= 0
