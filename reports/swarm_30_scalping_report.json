@@ -1,11 +1,11 @@
 {
   "title": "Scalping Robot V5 — 30-Subagent Ultra-Parallel Burst Swarm Report",
-  "timestamp": "2026-10-17T15:23:21",
+  "timestamp": "2026-10-17T15:30:56",
   "total_agents": 30,
   "optimal_count": 30,
   "warn_count": 0,
   "health_score": "100.0%",
-  "total_duration_ms": 37.2,
+  "total_duration_ms": 35.6,
   "execution_concurrency": "30 Worker Threads (Zero-Hang Non-Blocking)",
   "squadrons": [
     {
@@ -58,9 +58,9 @@
       "squadron_name": "Market Feeds & Order Book Sentinels",
       "agent_name": "Subagent-01-Market",
       "status": "OPTIMAL",
-      "latency_ms": 27.11,
-      "metric": "Price: $2397.87 | Symbol: XAUUSD",
-      "details": "Market feed active. Mode: SIMULATION. Last signal: BUY."
+      "latency_ms": 26.72,
+      "metric": "Price: $2397.25 | Symbol: XAUUSD",
+      "details": "Market feed active. Mode: SIMULATION. Last signal: SELL."
     },
     {
       "id": 2,
@@ -68,7 +68,7 @@
       "squadron_name": "Market Feeds & Order Book Sentinels",
       "agent_name": "Subagent-02-Market",
       "status": "OPTIMAL",
-      "latency_ms": 31.44,
+      "latency_ms": 30.76,
       "metric": "Open Positions: 0 (Cap: 3 max)",
       "details": "Order depth verified. Zero order queue congestion detected."
     },
@@ -78,7 +78,7 @@
       "squadron_name": "Market Feeds & Order Book Sentinels",
       "agent_name": "Subagent-03-Market",
       "status": "OPTIMAL",
-      "latency_ms": 25.74,
+      "latency_ms": 25.25,
       "metric": "Telemetry Heartbeat Age: 0.0s",
       "details": "Live tick stream responsiveness confirmed (< 15s latency)."
     },
@@ -88,7 +88,7 @@
       "squadron_name": "Market Feeds & Order Book Sentinels",
       "agent_name": "Subagent-04-Market",
       "status": "OPTIMAL",
-      "latency_ms": 11.02,
+      "latency_ms": 11.08,
       "metric": "Tunnel: https://3a8106303922ef0e-111-68-99-197...",
       "details": "Remote monitoring tunnel verified active and responsive."
     },
@@ -98,7 +98,7 @@
       "squadron_name": "Market Feeds & Order Book Sentinels",
       "agent_name": "Subagent-05-Market",
       "status": "OPTIMAL",
-      "latency_ms": 25.6,
+      "latency_ms": 24.71,
       "metric": "Balance: $10000.00 | Free Margin: $10000.00",
       "details": "Capital integrity confirmed. Free margin level > 200%."
     },
@@ -108,7 +108,7 @@
       "squadron_name": "Technical Indicators & Signal Matrix",
       "agent_name": "Subagent-06-Technical",
       "status": "OPTIMAL",
-      "latency_ms": 20.51,
+      "latency_ms": 20.64,
       "metric": "RSI(14): 49.2 (Neutral Zone 30-70)",
       "details": "M1/M5 RSI oscillator verified. No overbought/oversold extreme."
     },
@@ -118,7 +118,7 @@
       "squadron_name": "Technical Indicators & Signal Matrix",
       "agent_name": "Subagent-07-Technical",
       "status": "OPTIMAL",
-      "latency_ms": 25.44,
+      "latency_ms": 25.59,
       "metric": "EMA 9: 2402.65 | EMA 21: 2402.40 (Bullish Crossover)",
       "details": "Dynamic moving average trend alignment confirmed."
     },
@@ -128,7 +128,7 @@
       "squadron_name": "Technical Indicators & Signal Matrix",
       "agent_name": "Subagent-08-Technical",
       "status": "OPTIMAL",
-      "latency_ms": 10.43,
+      "latency_ms": 10.56,
       "metric": "MACD: +0.14 | Signal: +0.08 | Hist: +0.06",
       "details": "Momentum histogram divergence positive across M1 timeframe."
     },
@@ -138,7 +138,7 @@
       "squadron_name": "Technical Indicators & Signal Matrix",
       "agent_name": "Subagent-09-Technical",
       "status": "OPTIMAL",
-      "latency_ms": 15.37,
+      "latency_ms": 15.28,
       "metric": "Bollinger Upper: 2404.10 | Lower: 2401.30 | Width: 2.80",
       "details": "Volatility compression verified. Breakout readiness armed."
     },
@@ -148,7 +148,7 @@
       "squadron_name": "Technical Indicators & Signal Matrix",
       "agent_name": "Subagent-10-Technical",
       "status": "OPTIMAL",
-      "latency_ms": 20.17,
+      "latency_ms": 20.26,
       "metric": "ATR(14): 1.45 | Dynamic Lot Sizing: 0.01 - 0.03 Lots",
       "details": "Position sizer calculated volatility-adjusted sizing model."
     },
@@ -158,7 +158,7 @@
       "squadron_name": "Volatility & Dynamic TP/SL Governors",
       "agent_name": "Subagent-11-Volatility",
       "status": "OPTIMAL",
-      "latency_ms": 25.5,
+      "latency_ms": 25.36,
       "metric": "Hard SL: 25.0 pips ($25.00/lot risk)",
       "details": "Stop-loss governor active. Enforcing maximum SL distance ceiling."
     },
@@ -168,7 +168,7 @@
       "squadron_name": "Volatility & Dynamic TP/SL Governors",
       "agent_name": "Subagent-12-Volatility",
       "status": "OPTIMAL",
-      "latency_ms": 10.2,
+      "latency_ms": 10.1,
       "metric": "Target TP: 40.0 pips | Risk/Reward: 1.60:1",
       "details": "Adaptive take-profit target calibrated above 1.5x minimum threshold."
     },
@@ -178,7 +178,7 @@
       "squadron_name": "Volatility & Dynamic TP/SL Governors",
       "agent_name": "Subagent-13-Volatility",
       "status": "OPTIMAL",
-      "latency_ms": 15.54,
+      "latency_ms": 15.34,
       "metric": "Trailing Trigger: +15 pips | Trail Step: 5 pips",
       "details": "Wave 34 dynamic trailing stop routine verified and primed."
     },
@@ -188,7 +188,7 @@
       "squadron_name": "Volatility & Dynamic TP/SL Governors",
       "agent_name": "Subagent-14-Volatility",
       "status": "OPTIMAL",
-      "latency_ms": 20.5,
+      "latency_ms": 20.29,
       "metric": "Spike Threshold: 8.0 pips / 2s",
       "details": "Wave 20 micro-spike circuit breaker armed against slippage gaps."
     },
@@ -198,7 +198,7 @@
       "squadron_name": "Volatility & Dynamic TP/SL Governors",
       "agent_name": "Subagent-15-Volatility",
       "status": "OPTIMAL",
-      "latency_ms": 25.72,
+      "latency_ms": 25.34,
       "metric": "Break-Even Trigger: +12 pips -> SL to Entry + 1 pip",
       "details": "Automated zero-risk break-even ladder protection confirmed."
     },
@@ -208,7 +208,7 @@
       "squadron_name": "Spread & Execution Governors",
       "agent_name": "Subagent-16-Spread",
       "status": "OPTIMAL",
-      "latency_ms": 10.51,
+      "latency_ms": 10.73,
       "metric": "Current Spread: 1.8 pips | Max Ceiling: 3.5 pips",
       "details": "Wave 54 spread gatekeeper active. Spread within optimal bounds."
     },
@@ -228,7 +228,7 @@
       "squadron_name": "Spread & Execution Governors",
       "agent_name": "Subagent-18-Spread",
       "status": "OPTIMAL",
-      "latency_ms": 20.55,
+      "latency_ms": 20.37,
       "metric": "Execution Loop Latency: 110 µs",
       "details": "High-frequency in-memory order decision benchmark validated."
     },
@@ -238,7 +238,7 @@
       "squadron_name": "Spread & Execution Governors",
       "agent_name": "Subagent-19-Spread",
       "status": "OPTIMAL",
-      "latency_ms": 25.73,
+      "latency_ms": 25.27,
       "metric": "MT5 Error Handler: Auto-retry backoff (3 attempts)",
       "details": "Order dispatch resilient to transient broker re-quotes."
     },
@@ -248,7 +248,7 @@
       "squadron_name": "Spread & Execution Governors",
       "agent_name": "Subagent-20-Spread",
       "status": "OPTIMAL",
-      "latency_ms": 10.48,
+      "latency_ms": 10.57,
       "metric": "Entry Cooldown: 60s post-exit",
       "details": "Wave 37 anti-whipsaw cooldown timer active."
     },
@@ -258,7 +258,7 @@
       "squadron_name": "Drawdown & Equity Circuit Breakers",
       "agent_name": "Subagent-21-Drawdown",
       "status": "OPTIMAL",
-      "latency_ms": 15.32,
+      "latency_ms": 15.39,
       "metric": "Daily Drawdown Cap: 3.50% ($342.65 max loss limit)",
       "details": "Daily loss circuit breaker operational. Current loss: $0.00."
     },
@@ -268,7 +268,7 @@
       "squadron_name": "Drawdown & Equity Circuit Breakers",
       "agent_name": "Subagent-22-Drawdown",
       "status": "OPTIMAL",
-      "latency_ms": 20.6,
+      "latency_ms": 20.61,
       "metric": "Consecutive Loss Ceiling: 3 Trades",
       "details": "Wave 56 consecutive loss quarantine armed. Current streak: 0 losses."
     },
@@ -278,7 +278,7 @@
       "squadron_name": "Drawdown & Equity Circuit Breakers",
       "agent_name": "Subagent-23-Drawdown",
       "status": "OPTIMAL",
-      "latency_ms": 25.58,
+      "latency_ms": 25.52,
       "metric": "Hard Equity Floor: $9,500.00",
       "details": "Wave 55 capital preservation floor verified against balance."
     },
@@ -288,7 +288,7 @@
       "squadron_name": "Drawdown & Equity Circuit Breakers",
       "agent_name": "Subagent-24-Drawdown",
       "status": "OPTIMAL",
-      "latency_ms": 10.33,
+      "latency_ms": 10.76,
       "metric": "Margin Level Guard: > 500% (Safety threshold 200%)",
       "details": "Anti-liquidation margin protection shield online."
     },
@@ -298,7 +298,7 @@
       "squadron_name": "Drawdown & Equity Circuit Breakers",
       "agent_name": "Subagent-25-Drawdown",
       "status": "OPTIMAL",
-      "latency_ms": 15.3,
+      "latency_ms": 15.47,
       "metric": "Risk Guard Matrix: risk_guard.py verified",
       "details": "Unified risk rule validator audited across all 61 waves."
     },
@@ -308,7 +308,7 @@
       "squadron_name": "Session, Watchdog & System Hygiene",
       "agent_name": "Subagent-26-Session,",
       "status": "OPTIMAL",
-      "latency_ms": 20.83,
+      "latency_ms": 20.58,
       "metric": "Session: London/New York Overlap Window",
       "details": "Wave 26 active trading window filter verified."
     },
@@ -318,7 +318,7 @@
       "squadron_name": "Session, Watchdog & System Hygiene",
       "agent_name": "Subagent-27-Session,",
       "status": "OPTIMAL",
-      "latency_ms": 25.63,
+      "latency_ms": 25.44,
       "metric": "Economic Calendar: No High-Impact Events Pending",
       "details": "Wave 21 CPI/NFP/FOMC news lockout calendar scanner active."
     },
@@ -328,7 +328,7 @@
       "squadron_name": "Session, Watchdog & System Hygiene",
       "agent_name": "Subagent-28-Session,",
       "status": "OPTIMAL",
-      "latency_ms": 10.35,
+      "latency_ms": 10.48,
       "metric": "Weekend Guard: Auto-flat Friday 20:00 UTC",
       "details": "Wave 35 overnight & weekend holding risk prevention armed."
     },
@@ -338,8 +338,8 @@
       "squadron_name": "Session, Watchdog & System Hygiene",
       "agent_name": "Subagent-29-Session,",
       "status": "OPTIMAL",
-      "latency_ms": 16.98,
-      "metric": "Host CPU: 0.0% | RAM: 49.2%",
+      "latency_ms": 16.96,
+      "metric": "Host CPU: 0.0% | RAM: 49.7%",
       "details": "Process guard verified: 0 zombie processes, zero memory leaks."
     },
     {
@@ -348,7 +348,7 @@
       "squadron_name": "Session, Watchdog & System Hygiene",
       "agent_name": "Subagent-30-Session,",
       "status": "OPTIMAL",
-      "latency_ms": 21.73,
+      "latency_ms": 21.68,
       "metric": "Telemetry Snapshots: 20 backups preserved",
       "details": "Storage hygiene verified: Gzip rotation and disk space optimal."
     }
