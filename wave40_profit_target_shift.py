@@ -26,6 +26,23 @@ class ProfitTargetShift:
         self._last_factor: float = 1.0
         self._mode: str = "NORMAL"
 
+    @property
+    def mode(self) -> str:
+        with self._lock:
+            return self._mode
+
+    @property
+    def tp_factor(self) -> float:
+        with self._lock:
+            return self._last_factor
+
+    # ------------------------------------------------------------------
+    def reset(self) -> None:
+        """Reset internal mode and factor."""
+        with self._lock:
+            self._mode = "NORMAL"
+            self._last_factor = 1.0
+
     # ------------------------------------------------------------------
     def adjust_tp(self, raw_tp_pips: float, daily_pnl: float) -> float:
         """
@@ -38,10 +55,24 @@ class ProfitTargetShift:
         Returns:
             float: Modified TP in pips.
         """
-        if raw_tp_pips is None or math.isnan(raw_tp_pips) or math.isinf(raw_tp_pips) or raw_tp_pips <= 0:
+        if (
+            raw_tp_pips is None
+            or isinstance(raw_tp_pips, bool)
+            or not isinstance(raw_tp_pips, (int, float))
+            or not math.isfinite(raw_tp_pips)
+            or raw_tp_pips <= 0
+        ):
             return raw_tp_pips
 
-        safe_pnl = 0.0 if (daily_pnl is None or math.isnan(daily_pnl) or math.isinf(daily_pnl)) else float(daily_pnl)
+        if (
+            daily_pnl is None
+            or isinstance(daily_pnl, bool)
+            or not isinstance(daily_pnl, (int, float))
+            or not math.isfinite(daily_pnl)
+        ):
+            safe_pnl = 0.0
+        else:
+            safe_pnl = float(daily_pnl)
 
         with self._lock:
             if safe_pnl >= _TP_TIGHTEN_THRESHOLD:
@@ -62,13 +93,15 @@ class ProfitTargetShift:
                     f"TP factor={factor:.2f}x (daily_pnl=${safe_pnl:+.2f})"
                 )
 
-            adjusted = round(raw_tp_pips * factor, 1)
+            adjusted = round(float(raw_tp_pips) * factor, 1)
             return adjusted
 
     # ------------------------------------------------------------------
     def info(self) -> dict:
         with self._lock:
             return {
+                "wave": 40,
+                "name": "ProfitTargetShift",
                 "mode": self._mode,
                 "tp_factor": self._last_factor,
                 "tighten_threshold_usd": _TP_TIGHTEN_THRESHOLD,
