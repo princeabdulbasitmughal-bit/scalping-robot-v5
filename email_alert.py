@@ -36,7 +36,7 @@ DEFAULT_CONFIG = {
 
 class EmailAlerter:
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self.config = self._load_config()
 
     def _load_config(self):
