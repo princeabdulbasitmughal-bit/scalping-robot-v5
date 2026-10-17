@@ -16,7 +16,7 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trades.db')
 class TradeJournal:
     def __init__(self, db_path=None):
         self.db_path = db_path or DB_PATH
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._init_db()
 
     def _get_conn(self):
