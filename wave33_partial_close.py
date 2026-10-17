@@ -31,14 +31,20 @@ class PartialCloseManager:
         close_ratio: float = _PARTIAL_CLOSE_RATIO,
     ):
         try:
-            tp = float(trigger_pct)
-            self.trigger_pct = max(0.10, min(0.90, tp)) if math.isfinite(tp) else _PARTIAL_TRIGGER_PCT
+            if isinstance(trigger_pct, bool):
+                self.trigger_pct = _PARTIAL_TRIGGER_PCT
+            else:
+                tp = float(trigger_pct)
+                self.trigger_pct = max(0.10, min(0.90, tp)) if math.isfinite(tp) else _PARTIAL_TRIGGER_PCT
         except (ValueError, TypeError):
             self.trigger_pct = _PARTIAL_TRIGGER_PCT
 
         try:
-            cr = float(close_ratio)
-            self.close_ratio = max(0.10, min(0.90, cr)) if math.isfinite(cr) else _PARTIAL_CLOSE_RATIO
+            if isinstance(close_ratio, bool):
+                self.close_ratio = _PARTIAL_CLOSE_RATIO
+            else:
+                cr = float(close_ratio)
+                self.close_ratio = max(0.10, min(0.90, cr)) if math.isfinite(cr) else _PARTIAL_CLOSE_RATIO
         except (ValueError, TypeError):
             self.close_ratio = _PARTIAL_CLOSE_RATIO
 
@@ -60,6 +66,8 @@ class PartialCloseManager:
 
     def remove_ticket(self, ticket: Any) -> None:
         """Clean up closed position ticket from history."""
+        if ticket is None:
+            return
         with self._lock:
             self._closed_tickets.discard(ticket)
 
@@ -89,16 +97,22 @@ class PartialCloseManager:
         if lot is None or isinstance(lot, bool):
             return 0.0
         try:
+            min_l = float(min_lot) if (min_lot is not None and not isinstance(min_lot, bool)) else 0.01
+            step = float(lot_step) if (lot_step is not None and not isinstance(lot_step, bool)) else 0.01
+            if min_l <= 0:
+                min_l = 0.01
+            if step <= 0:
+                step = 0.01
             total_lot = float(lot)
-            if not math.isfinite(total_lot) or total_lot < (min_lot * 2):
+            if not math.isfinite(total_lot) or total_lot < (min_l * 2):
                 return 0.0
 
             raw_close = total_lot * self.close_ratio
-            steps = math.floor((raw_close / lot_step) + 1e-9)
-            quantized = round(steps * lot_step, 2)
+            steps = math.floor((raw_close / step) + 1e-9)
+            quantized = round(steps * step, 2)
             # Ensure at least min_lot remains open and at least min_lot is closed
-            if quantized < min_lot or (total_lot - quantized) < min_lot:
-                return min_lot
+            if quantized < min_l or (total_lot - quantized) < min_l:
+                return min_l
             return quantized
         except (ValueError, TypeError):
             return 0.0
@@ -119,10 +133,13 @@ class PartialCloseManager:
         Call once per tick per open position.
 
         Returns False if:
+          - ticket is None or boolean
           - ticket already partially closed
           - lot too small to split (< 0.02)
           - position not yet at trigger threshold
         """
+        if ticket is None or isinstance(ticket, bool):
+            return False
         if entry_price is None or current_price is None or tp_price is None or lot is None:
             return False
         if isinstance(entry_price, bool) or isinstance(current_price, bool) or isinstance(tp_price, bool) or isinstance(lot, bool):

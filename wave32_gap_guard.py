@@ -35,22 +35,31 @@ class GapGuard:
         pip_size: float = _DEFAULT_PIP_SIZE,
     ):
         try:
-            ps = float(pip_size)
-            self._pip_size = ps if math.isfinite(ps) and ps > 0 else _DEFAULT_PIP_SIZE
+            if isinstance(pip_size, bool):
+                self._pip_size = _DEFAULT_PIP_SIZE
+            else:
+                ps = float(pip_size)
+                self._pip_size = ps if math.isfinite(ps) and ps > 0 else _DEFAULT_PIP_SIZE
         except (ValueError, TypeError):
             self._pip_size = _DEFAULT_PIP_SIZE
 
         try:
-            gt = float(gap_threshold_pips)
-            self._gap_threshold_pips = gt if math.isfinite(gt) and gt > 0 else _DEFAULT_GAP_THRESHOLD_PIPS
+            if isinstance(gap_threshold_pips, bool):
+                self._gap_threshold_pips = _DEFAULT_GAP_THRESHOLD_PIPS
+            else:
+                gt = float(gap_threshold_pips)
+                self._gap_threshold_pips = gt if math.isfinite(gt) and gt > 0 else _DEFAULT_GAP_THRESHOLD_PIPS
         except (ValueError, TypeError):
             self._gap_threshold_pips = _DEFAULT_GAP_THRESHOLD_PIPS
 
         self._gap_threshold = self._gap_threshold_pips * self._pip_size  # in price units
 
         try:
-            bd = float(block_duration_sec)
-            self._block_duration = bd if math.isfinite(bd) and bd >= 0 else _DEFAULT_BLOCK_DURATION_SEC
+            if isinstance(block_duration_sec, bool):
+                self._block_duration = _DEFAULT_BLOCK_DURATION_SEC
+            else:
+                bd = float(block_duration_sec)
+                self._block_duration = bd if math.isfinite(bd) and bd >= 0 else _DEFAULT_BLOCK_DURATION_SEC
         except (ValueError, TypeError):
             self._block_duration = _DEFAULT_BLOCK_DURATION_SEC
 
@@ -82,7 +91,7 @@ class GapGuard:
         except (ValueError, TypeError):
             return
 
-        current_time = float(now_ts) if now_ts is not None else time.time()
+        current_time = float(now_ts) if (now_ts is not None and not isinstance(now_ts, bool)) else time.time()
 
         try:
             with self._lock:
@@ -110,7 +119,7 @@ class GapGuard:
         Returns (allowed: bool, reason: str).
         allowed=False means a gap was recently detected; avoid trading.
         """
-        current_time = float(now_ts) if now_ts is not None else time.time()
+        current_time = float(now_ts) if (now_ts is not None and not isinstance(now_ts, bool)) else time.time()
         with self._lock:
             if self._gap_detected_at == 0:
                 return (True, "")
@@ -130,7 +139,7 @@ class GapGuard:
         return self.is_entry_blocked(now_ts=now_ts)
 
     def info(self, now_ts: Optional[float] = None) -> dict:
-        current_time = float(now_ts) if now_ts is not None else time.time()
+        current_time = float(now_ts) if (now_ts is not None and not isinstance(now_ts, bool)) else time.time()
         with self._lock:
             if self._gap_detected_at == 0:
                 allowed = True
