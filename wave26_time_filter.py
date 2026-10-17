@@ -55,8 +55,8 @@ class TimeFilter:
         else:
             self._release_times = list(_DEFAULT_RELEASE_TIMES_UTC)
         self._validate_release_times(self._release_times)
-        self._block_before   = max(0, int(block_before))
-        self._block_after    = max(0, int(block_after))
+        self._block_before   = max(0, int(block_before)) if isinstance(block_before, (int, float)) and not isinstance(block_before, bool) else _BLOCK_MINUTES_BEFORE
+        self._block_after    = max(0, int(block_after)) if isinstance(block_after, (int, float)) and not isinstance(block_after, bool) else _BLOCK_MINUTES_AFTER
         self._total_blocks   = 0
         self._last_block_reason: str = ""
         self._was_blocked: bool = False
@@ -73,7 +73,7 @@ class TimeFilter:
             if not (isinstance(item, (tuple, list)) and len(item) == 2):
                 raise ValueError(f"Each release time must be a tuple of (hour, minute), got {item!r}")
             h, m = item
-            if not (isinstance(h, int) and isinstance(m, int)):
+            if not (isinstance(h, int) and isinstance(m, int) and not isinstance(h, bool) and not isinstance(m, bool)):
                 raise TypeError(f"Hour and minute must be integers, got ({type(h).__name__}, {type(m).__name__})")
             if not (0 <= h <= 23):
                 raise ValueError(f"Hour must be in 0..23, got {h}")
@@ -84,13 +84,13 @@ class TimeFilter:
     def _normalize_datetime(dt: datetime.datetime | int | float | str | None) -> datetime.datetime:
         """
         Ensures datetime is a timezone-aware UTC datetime.
-        - None: returns datetime.datetime.now(timezone.utc)
+        - None or bool: returns datetime.datetime.now(timezone.utc)
         - int/float: treated as UTC unix epoch timestamp
         - str: parsed as ISO 8601 string
         - naive datetime: assumed to represent UTC, tzinfo attached
         - aware datetime: converted to UTC via astimezone
         """
-        if dt is None:
+        if dt is None or isinstance(dt, bool):
             return datetime.datetime.now(timezone.utc)
         if isinstance(dt, (int, float)):
             return datetime.datetime.fromtimestamp(dt, tz=timezone.utc)

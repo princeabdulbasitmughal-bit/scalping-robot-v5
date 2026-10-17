@@ -42,8 +42,10 @@ def compute_pearson_correlation(
 
     # Ensure all elements are clean finite floats
     try:
-        clean_a = [float(x) for x in series_a]
-        clean_b = [float(x) for x in series_b]
+        clean_a = [float(x) for x in series_a if not isinstance(x, bool)]
+        clean_b = [float(x) for x in series_b if not isinstance(x, bool)]
+        if len(clean_a) < 2 or len(clean_b) < 2 or len(clean_a) != len(clean_b):
+            return 0.0
         if not all(math.isfinite(x) for x in clean_a) or not all(math.isfinite(x) for x in clean_b):
             return 0.0
     except (ValueError, TypeError):
@@ -98,10 +100,10 @@ class CorrelationGuard:
         cooldown_sec: float = 60.0,
         max_corr_threshold: float = 0.85,
     ):
-        self._window_sec = float(window_sec) if window_sec > 0 else 30.0
-        self._max_signals = int(max_signals_in_window) if max_signals_in_window > 0 else 3
-        self._cooldown_sec = float(cooldown_sec) if cooldown_sec >= 0 else 60.0
-        self._max_corr_threshold = float(max_corr_threshold)
+        self._window_sec = float(window_sec) if isinstance(window_sec, (int, float)) and not isinstance(window_sec, bool) and window_sec > 0 else 30.0
+        self._max_signals = int(max_signals_in_window) if isinstance(max_signals_in_window, (int, float)) and not isinstance(max_signals_in_window, bool) and max_signals_in_window > 0 else 3
+        self._cooldown_sec = float(cooldown_sec) if isinstance(cooldown_sec, (int, float)) and not isinstance(cooldown_sec, bool) and cooldown_sec >= 0 else 60.0
+        self._max_corr_threshold = float(max_corr_threshold) if isinstance(max_corr_threshold, (int, float)) and not isinstance(max_corr_threshold, bool) else 0.85
 
         self._signal_times: deque[float] = deque(maxlen=50)
         self._blocked_until: float = 0.0
@@ -121,7 +123,7 @@ class CorrelationGuard:
         Call this every time a non-HOLD signal is generated.
         Supports optional `now_ts` for deterministic simulation.
         """
-        now = float(now_ts) if now_ts is not None else time.monotonic()
+        now = float(now_ts) if (now_ts is not None and not isinstance(now_ts, bool)) else time.monotonic()
         with self._lock:
             self._signal_times.append(now)
             self._maybe_trigger_cooldown(now)
@@ -130,7 +132,7 @@ class CorrelationGuard:
         """
         Returns (True, "") if clear, or (False, reason) if in cooldown.
         """
-        now = float(now_ts) if now_ts is not None else time.monotonic()
+        now = float(now_ts) if (now_ts is not None and not isinstance(now_ts, bool)) else time.monotonic()
         with self._lock:
             if now < self._blocked_until:
                 remaining = max(0.1, round(self._blocked_until - now, 1))
@@ -142,7 +144,7 @@ class CorrelationGuard:
 
     def info(self, now_ts: Optional[float] = None) -> dict:
         """Return status dict for live_status.json."""
-        now = float(now_ts) if now_ts is not None else time.monotonic()
+        now = float(now_ts) if (now_ts is not None and not isinstance(now_ts, bool)) else time.monotonic()
         with self._lock:
             in_cooldown = now < self._blocked_until
             cutoff = now - self._window_sec
@@ -172,7 +174,7 @@ class CorrelationGuard:
 
     def update_asset_price(self, symbol: str, price: float) -> None:
         """Record price tick for cross-asset correlation analysis."""
-        if not symbol or not isinstance(price, (int, float)) or not math.isfinite(price):
+        if not symbol or isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price):
             return
         with self._lock:
             if symbol not in self._asset_buffers:
