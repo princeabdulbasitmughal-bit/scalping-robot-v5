@@ -124,14 +124,18 @@ class SignalScorer:
     # ── Volume Proxy (tick activity) ──────────────────────────────────────────
     def update_volume_proxy(self, price_change: float):
         """Track price movement as volume proxy."""
-        self._vol_proxy.append(abs(price_change))
+        if isinstance(price_change, (int, float)) and math.isfinite(price_change):
+            with self._lock:
+                self._vol_proxy.append(abs(float(price_change)))
 
     def is_high_volume(self) -> bool:
         """True if current tick movement > 1.5x recent average."""
-        if len(self._vol_proxy) < 5:
-            return False
-        avg = sum(list(self._vol_proxy)[:-1]) / (len(self._vol_proxy) - 1)
-        return self._vol_proxy[-1] > avg * 1.5 if avg > 0 else False
+        with self._lock:
+            if len(self._vol_proxy) < 5:
+                return False
+            vol_list = list(self._vol_proxy)
+        avg = sum(vol_list[:-1]) / (len(vol_list) - 1)
+        return vol_list[-1] > avg * 1.5 if avg > 0 else False
 
     # ── Master Score ──────────────────────────────────────────────────────────
     def score_signal(
@@ -224,6 +228,11 @@ class SignalScorer:
         Return (sl_pips, tp_pips) scaled by ATR volatility.
         Low volatility → tighter SL. High volatility → wider SL.
         """
+        if not isinstance(base_sl_pips, (int, float)) or not math.isfinite(base_sl_pips) or base_sl_pips <= 0:
+            base_sl_pips = 30.0
+        if not isinstance(rr_ratio, (int, float)) or not math.isfinite(rr_ratio) or rr_ratio <= 0:
+            rr_ratio = 1.5
+
         atr = self.compute_atr(bars)
         # ATR in price terms for XAUUSD. Convert to pips (1 pip = 0.1)
         atr_pips = atr / 0.1

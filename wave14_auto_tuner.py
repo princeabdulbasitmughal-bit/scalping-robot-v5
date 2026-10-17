@@ -16,6 +16,7 @@ import json
 import math
 import time
 import logging
+import threading
 from datetime import datetime, timezone
 
 logger = logging.getLogger("wave14_tuner")
@@ -25,19 +26,29 @@ logger = logging.getLogger("wave14_tuner")
 # ---------------------------------------------------------------------------
 
 def _mean(values):
-    return sum(values) / len(values) if values else 0.0
+    if not values:
+        return 0.0
+    clean = [float(v) for v in values if isinstance(v, (int, float)) and math.isfinite(v)]
+    return sum(clean) / len(clean) if clean else 0.0
 
 def _std(values):
-    if len(values) < 2:
+    if not values:
         return 0.0
-    m = _mean(values)
-    return math.sqrt(sum((v - m) ** 2 for v in values) / (len(values) - 1))
+    clean = [float(v) for v in values if isinstance(v, (int, float)) and math.isfinite(v)]
+    if len(clean) < 2:
+        return 0.0
+    m = _mean(clean)
+    var = sum((v - m) ** 2 for v in clean) / (len(clean) - 1)
+    return math.sqrt(max(0.0, var))
 
 def _percentile(values, pct):
     """Approximate percentile without numpy."""
     if not values:
         return 0.0
-    sorted_v = sorted(values)
+    clean = [float(v) for v in values if isinstance(v, (int, float)) and math.isfinite(v)]
+    if not clean:
+        return 0.0
+    sorted_v = sorted(clean)
     idx = (pct / 100.0) * (len(sorted_v) - 1)
     lo = int(idx)
     hi = min(lo + 1, len(sorted_v) - 1)
@@ -83,36 +94,39 @@ class AutoTuner:
     def __init__(self, config_path: str = None):
         if config_path is None:
             config_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                os.path.dirname(os.path.abspath(__file__)),
                 "config.json"
             )
         self.config_path = config_path
         self._last_report: dict = {}
         self._last_run: float = 0.0
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     def _load_config(self) -> dict:
-        try:
-            if os.path.exists(self.config_path):
-                with open(self.config_path, "r") as f:
-                    cfg = json.load(f)
-                # Merge with defaults for any missing keys
-                for k, v in self.CONFIG_DEFAULTS.items():
-                    cfg.setdefault(k, v)
-                return cfg
-        except Exception as e:
-            logger.warning(f"[TUNER] Could not load config: {e}")
-        return dict(self.CONFIG_DEFAULTS)
+        with self._lock:
+            try:
+                if os.path.exists(self.config_path):
+                    with open(self.config_path, "r", encoding="utf-8") as f:
+                        cfg = json.load(f)
+                    # Merge with defaults for any missing keys
+                    for k, v in self.CONFIG_DEFAULTS.items():
+                        cfg.setdefault(k, v)
+                    return cfg
+            except Exception as e:
+                logger.warning(f"[TUNER] Could not load config: {e}")
+            return dict(self.CONFIG_DEFAULTS)
 
     def _save_config(self, cfg: dict):
-        try:
-            tmp_path = self.config_path + ".tmp"
-            with open(tmp_path, "w") as f:
-                json.dump(cfg, f, indent=2)
-            os.replace(tmp_path, self.config_path)
-            logger.info(f"[TUNER] Config saved to {self.config_path}")
-        except Exception as e:
-            logger.error(f"[TUNER] Could not save config: {e}")
+        with self._lock:
+            try:
+                tmp_path = self.config_path + ".tmp"
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, indent=2)
+                os.replace(tmp_path, self.config_path)
+                logger.info(f"[TUNER] Config saved to {self.config_path}")
+            except Exception as e:
+                logger.error(f"[TUNER] Could not save config: {e}")
 
     # ------------------------------------------------------------------
     def analyse(self, trade_history: list, current_config: dict = None) -> dict:
