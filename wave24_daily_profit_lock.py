@@ -28,7 +28,7 @@ class DailyProfitLock:
         daily_target_usd: float = None,
         **kwargs,
     ):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         if daily_target_usd is not None:
             resolved_target = daily_target_usd
         elif profit_target_usd is not None:
@@ -123,6 +123,8 @@ class DailyProfitLock:
             if self._protect_mode:
                 return max(base_score, self._protect_score)
             return base_score
+
+    apply_min_score = get_min_score
 
     def info(self) -> dict:
         """Summary dict for live_status.json."""

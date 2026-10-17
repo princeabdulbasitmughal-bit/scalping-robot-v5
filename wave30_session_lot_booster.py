@@ -24,7 +24,7 @@ class SessionLotBooster:
         min_vol_index: float = 1.3,
         min_win_rate: float = 55.0,
     ):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._start_h = overlap_start_utc
         self._end_h = overlap_end_utc
         self._boost = boost_multiplier
@@ -86,11 +86,12 @@ class SessionLotBooster:
             self._last_boosted = False
             return float(lot)
 
-    def info(self) -> dict:
-        utc_hour = datetime.now(timezone.utc).hour
+    def info(self, now_dt: datetime = None) -> dict:
+        dt = now_dt or datetime.now(timezone.utc)
+        utc_hour = dt.hour
         with self._lock:
             return {
-                "in_overlap_window": self._in_overlap(),
+                "in_overlap_window": self._in_overlap(now_dt=dt),
                 "overlap_hours_utc": f"{self._start_h:02d}:00-{self._end_h:02d}:00",
                 "boost_multiplier": self._boost,
                 "min_vol_index_required": self._min_vol,

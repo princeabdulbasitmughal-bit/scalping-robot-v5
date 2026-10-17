@@ -116,22 +116,31 @@ class SpikeFilter:
         self._last_seen_price = current_price
         return self.check(current_price, prev_price)
 
-    def is_blocked(self) -> bool:
+    def is_blocked(self, now_ts: float = None) -> bool:
+        now = time.time() if now_ts is None else float(now_ts)
         with self._lock:
-            return time.time() < self._blocked_until
+            return now < self._blocked_until
 
-    def info(self) -> dict:
+    def info(self, now_ts: float = None) -> dict:
         with self._lock:
-            now = time.time()
+            now = time.time() if now_ts is None else float(now_ts)
             recent_spikes = [t for t in self._spike_timestamps if now - t <= self.cluster_window_sec]
             return {
-                "blocked": time.time() < self._blocked_until,
+                "blocked": now < self._blocked_until,
                 "blocked_until_sec": max(0, int(self._blocked_until - now)),
                 "spikes_in_5min": len(recent_spikes),
                 "avg_tick_change": round(
                     sum(self._recent_changes) / len(self._recent_changes), 5
                 ) if self._recent_changes else 0.0,
             }
+
+    def reset(self) -> None:
+        """Reset rolling history and cooldown state."""
+        with self._lock:
+            self._recent_changes.clear()
+            self._spike_timestamps.clear()
+            self._blocked_until = 0.0
+            self._last_seen_price = 0.0
 
 
 # Module-level singleton

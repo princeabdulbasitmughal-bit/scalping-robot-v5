@@ -26,7 +26,7 @@ class NewsGuard:
         self._cached_reason: str = "no data"
         self._cache_ttl: float = 60.0   # re-read file every 60 s
         self._blocked_count: int = 0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     def _load(self) -> None:
@@ -87,6 +87,21 @@ class NewsGuard:
                 logger.info(f"[NEWS GUARD] BLOCKED #{self._blocked_count}: {self._cached_reason}")
                 return False, self._cached_reason
             return True, self._cached_reason
+
+    def set_override(self, avoid: bool, reason: str = "test override") -> None:
+        """Set explicit avoid/allow state for testing or manual control."""
+        with self._lock:
+            self._cached_avoid = bool(avoid)
+            self._cached_reason = str(reason)
+            self._last_check_time = time.time() + 999999.0  # bypass TTL
+
+    def reset(self) -> None:
+        """Reset internal cache and telemetry."""
+        with self._lock:
+            self._last_check_time = 0.0
+            self._cached_avoid = False
+            self._cached_reason = "no data"
+            self._blocked_count = 0
 
     def info(self) -> dict:
         """Summary dict for live_status.json."""

@@ -46,7 +46,7 @@ class DrawdownAccelerator:
         self._consec_losses: int = 0
         self._consec_wins: int = 0
         self._total_reductions: int = 0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------ #
     #  Public API                                                           #
@@ -136,6 +136,17 @@ class DrawdownAccelerator:
         if m >= 0.20:
             return "QUARTER_SIZE"
         return "MICRO_SIZE"
+
+    def info(self) -> dict:
+        """Telemetry diagnostics."""
+        with self._lock:
+            return {
+                "consec_losses": self._consec_losses,
+                "consec_wins": self._consec_wins,
+                "total_reductions": self._total_reductions,
+                "current_multiplier": self._get_multiplier(),
+                "mode": self._mode_label(),
+            }
 
 
 # Module-level singleton

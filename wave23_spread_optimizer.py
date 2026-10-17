@@ -39,7 +39,7 @@ class SpreadOptimizer:
     """
 
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._rejected_count: int = 0
         self._accepted_count: int = 0
         self._last_spread: float = 0.0

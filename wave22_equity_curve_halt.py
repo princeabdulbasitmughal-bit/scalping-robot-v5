@@ -58,7 +58,7 @@ class EquityCurveHalt:
                 self._consecutive_wins = 0
 
     # ------------------------------------------------------------------
-    def is_trading_allowed(self, current_balance: float) -> tuple:
+    def is_trading_allowed(self, current_balance: float, now_mono: float = None) -> tuple:
         """
         Returns (allowed: bool, reason: str).
         Call before each signal evaluation.
@@ -66,12 +66,13 @@ class EquityCurveHalt:
         if not isinstance(current_balance, (int, float)) or not math.isfinite(current_balance):
             return False, "EQUITY CURVE HALT: Invalid non-finite balance"
         with self._lock:
-            return self._is_trading_allowed_locked(float(current_balance))
+            return self._is_trading_allowed_locked(float(current_balance), now_mono=now_mono)
 
-    def _is_trading_allowed_locked(self, current_balance: float) -> tuple:
+    def _is_trading_allowed_locked(self, current_balance: float, now_mono: float = None) -> tuple:
+        cur_mono = time.monotonic() if now_mono is None else float(now_mono)
         # --- Check recovery if already halted ---
         if self._halted:
-            elapsed = time.monotonic() - self._halt_time
+            elapsed = cur_mono - self._halt_time
             wins_ok = self._consecutive_wins >= self._recovery_win_streak
             time_ok = elapsed >= self._cooldown_sec
 
@@ -101,7 +102,7 @@ class EquityCurveHalt:
 
         if window_sum < self._loss_threshold and slope < self._slope_threshold:
             self._halted = True
-            self._halt_time = time.monotonic()
+            self._halt_time = cur_mono
             self._halt_balance = current_balance
             self._halt_count += 1
             self._consecutive_wins = 0
@@ -114,6 +115,17 @@ class EquityCurveHalt:
             return False, f"EQUITY CURVE HALT #{self._halt_count}: {self._halt_reason}"
 
         return True, f"eq_ok sum=${window_sum:.2f} slope=${slope:.2f}"
+
+    def reset(self) -> None:
+        """Reset rolling history and halt status."""
+        with self._lock:
+            self._pnl_history.clear()
+            self._halted = False
+            self._halt_time = 0.0
+            self._halt_balance = 0.0
+            self._consecutive_wins = 0
+            self._halt_count = 0
+            self._halt_reason = ""
 
     def info(self) -> dict:
         """Summary dict for live_status.json."""
