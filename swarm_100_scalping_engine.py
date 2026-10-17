@@ -19,6 +19,7 @@ import os
 import sys
 import time
 import json
+import threading
 import psutil
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -39,9 +40,12 @@ REPORT_FILE = REPORTS_DIR / "swarm_100_scalping_report.json"
 class ScalpingSwarm100:
     def __init__(self):
         self.root = ROOT_DIR
+        self._lock = threading.RLock()
+        self.last_report: Optional[Dict[str, Any]] = None
 
-    def _execute_agent(self, agent_id: int) -> Dict[str, Any]:
+    def _execute_agent(self, agent_id: int, fast: bool = False) -> Dict[str, Any]:
         t0 = time.perf_counter()
+
         
         # Mapping 100 agents to 10 squadrons
         squad_idx = ((agent_id - 1) // 10) + 1
@@ -127,7 +131,8 @@ class ScalpingSwarm100:
             metric = f"Host CPU: {cpu}% | RAM: {ram}%"
             details = f"System Watchdog #{agent_id} confirmed zero zombie processes and active sockets."
 
-        time.sleep(0.01 + (agent_id % 5) * 0.005)
+        if not fast:
+            time.sleep(0.005 + (agent_id % 5) * 0.002)
         dt = round((time.perf_counter() - t0) * 1000, 2)
 
         return {
@@ -141,7 +146,7 @@ class ScalpingSwarm100:
             "details": details
         }
 
-    def run_swarm(self) -> Dict[str, Any]:
+    def run_swarm(self, fast: bool = False, max_workers: int = 50, save_report: bool = True) -> Dict[str, Any]:
         print("=" * 80)
         print("⚡ BASITSWARM 100 — SCALPING ROBOT V5 ULTRA-PARALLEL SWARM ENGINE ACTIVE")
         print("Deploying 100 concurrent autonomous agents across 10 strategic squadrons...")
@@ -150,11 +155,37 @@ class ScalpingSwarm100:
         t_start = time.perf_counter()
         results: List[Dict[str, Any]] = []
 
-        with ThreadPoolExecutor(max_workers=50) as executor:
-            future_to_id = {executor.submit(self._execute_agent, i): i for i in range(1, 101)}
+        with ThreadPoolExecutor(max_workers=max(1, int(max_workers))) as executor:
+            future_to_id = {executor.submit(self._execute_agent, i, fast): i for i in range(1, 101)}
             for future in as_completed(future_to_id):
-                res = future.result()
-                results.append(res)
+                aid = future_to_id[future]
+                try:
+                    res = future.result()
+                    results.append(res)
+                except Exception as exc:
+                    s_id = ((aid - 1) // 10) + 1
+                    squad_names = [
+                        "Market Feeds & XAUUSD Tick Sentinel",
+                        "Technical Indicators & Trend Oscillators",
+                        "Volatility & Dynamic TP/SL Handlers",
+                        "Spread & Execution Governors",
+                        "Drawdown & Equity Circuit Breakers",
+                        "Profit Streak & Recovery Management",
+                        "Time, Session & News Safeguards",
+                        "Candlestick, Reversal & Pattern Detectors",
+                        "ML & Autonomous AI Prediction Matrix",
+                        "Process Watchdog, Live Heartbeat & Telemetry"
+                    ]
+                    results.append({
+                        "id": aid,
+                        "squadron_id": s_id,
+                        "squadron_name": squad_names[s_id - 1] if 1 <= s_id <= 10 else f"Squadron {s_id}",
+                        "agent_name": f"Agent-{aid:03d}",
+                        "status": "WARN",
+                        "latency_ms": 0.0,
+                        "metric": f"Subagent exception: {exc}",
+                        "details": "Recovered by Swarm Resilience Guard"
+                    })
 
         results.sort(key=lambda x: x["id"])
         total_time_ms = round((time.perf_counter() - t_start) * 1000, 1)
@@ -184,17 +215,27 @@ class ScalpingSwarm100:
             "warn_count": 100 - optimal_total,
             "health_score": f"{overall_health}%",
             "total_duration_ms": total_time_ms,
-            "execution_concurrency": "50 Worker Threads (Zero-Hang Non-Blocking)",
+            "execution_concurrency": f"{max_workers} Worker Threads (Zero-Hang Non-Blocking)",
             "squadrons": squadrons_summary,
             "agents": results
         }
 
-        with open(REPORT_FILE, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2)
+        with self._lock:
+            self.last_report = report
+
+        if save_report:
+            tmp_report = REPORT_FILE.with_suffix(".tmp")
+            try:
+                with open(tmp_report, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2, ensure_ascii=False)
+                tmp_report.replace(REPORT_FILE)
+            except Exception:
+                with open(REPORT_FILE, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2, ensure_ascii=False)
 
         print(f"\n✅ 100-Subagent Swarm Completed in {total_time_ms}ms!")
         print(f"📊 Overall Health Score : {overall_health}% ({optimal_total}/100 Optimal)")
-        print(f"⚡ Concurrency Model    : 50 Worker Threads (Zero-Hang Non-Blocking)")
+        print(f"⚡ Concurrency Model    : {max_workers} Worker Threads (Zero-Hang Non-Blocking)")
         print(f"📁 Detailed Report      : reports/swarm_100_scalping_report.json\n")
 
         for s in squadrons_summary:
@@ -203,6 +244,12 @@ class ScalpingSwarm100:
         print("=" * 80)
         return report
 
+    def get_last_report(self) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            return self.last_report
+
+
 if __name__ == "__main__":
     swarm = ScalpingSwarm100()
     swarm.run_swarm()
+

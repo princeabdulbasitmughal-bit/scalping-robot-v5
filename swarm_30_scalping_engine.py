@@ -20,10 +20,11 @@ import os
 import sys
 import time
 import json
+import threading
 import psutil
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 if sys.platform == "win32":
     try:
@@ -42,6 +43,9 @@ class ScalpingSwarm30:
 
     def __init__(self):
         self.root = ROOT_DIR
+        self._lock = threading.RLock()
+        self.last_report: Optional[Dict[str, Any]] = None
+
 
     def _execute_agent(self, agent_id: int) -> Dict[str, Any]:
         t0 = time.perf_counter()
@@ -256,7 +260,7 @@ class ScalpingSwarm30:
             "details": details
         }
 
-    def run_swarm(self) -> Dict[str, Any]:
+    def run_swarm(self, fast: bool = False, max_workers: int = 30, save_report: bool = True) -> Dict[str, Any]:
         print("=" * 80)
         print("⚡ BASITSWARM 30 — SCALPING ROBOT V5 ULTRA-PARALLEL SWARM ENGINE ACTIVE")
         print("Executing 30 concurrent autonomous agents across 6 strategic squadrons...")
@@ -265,7 +269,7 @@ class ScalpingSwarm30:
         t_start = time.perf_counter()
         results: List[Dict[str, Any]] = []
 
-        with ThreadPoolExecutor(max_workers=30) as executor:
+        with ThreadPoolExecutor(max_workers=max(1, int(max_workers))) as executor:
             future_to_id = {executor.submit(self._execute_agent, i): i for i in range(1, 31)}
             for future in as_completed(future_to_id):
                 aid = future_to_id[future]
@@ -313,23 +317,27 @@ class ScalpingSwarm30:
             "warn_count": 30 - optimal_total,
             "health_score": f"{overall_health}%",
             "total_duration_ms": total_time_ms,
-            "execution_concurrency": "30 Worker Threads (Zero-Hang Non-Blocking)",
+            "execution_concurrency": f"{max_workers} Worker Threads (Zero-Hang Non-Blocking)",
             "squadrons": squadrons_summary,
             "agents": results
         }
 
-        tmp_report = REPORT_FILE.with_suffix(".tmp")
-        try:
-            with open(tmp_report, "w", encoding="utf-8") as f:
-                json.dump(report, f, indent=2, ensure_ascii=False)
-            tmp_report.replace(REPORT_FILE)
-        except Exception:
-            with open(REPORT_FILE, "w", encoding="utf-8") as f:
-                json.dump(report, f, indent=2, ensure_ascii=False)
+        with self._lock:
+            self.last_report = report
+
+        if save_report:
+            tmp_report = REPORT_FILE.with_suffix(".tmp")
+            try:
+                with open(tmp_report, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2, ensure_ascii=False)
+                tmp_report.replace(REPORT_FILE)
+            except Exception:
+                with open(REPORT_FILE, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2, ensure_ascii=False)
 
         print(f"\n✅ 30-Subagent Swarm Completed in {total_time_ms}ms!")
         print(f"📊 Overall Health Score : {overall_health}% ({optimal_total}/30 Optimal)")
-        print(f"⚡ Concurrency Model    : 30 Worker Threads (Zero-Hang Non-Blocking)")
+        print(f"⚡ Concurrency Model    : {max_workers} Worker Threads (Zero-Hang Non-Blocking)")
         print(f"📁 Detailed Report      : reports/swarm_30_scalping_report.json\n")
 
         for s in squadrons_summary:
@@ -337,6 +345,11 @@ class ScalpingSwarm30:
 
         print("=" * 80)
         return report
+
+    def get_last_report(self) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            return self.last_report
+
 
 if __name__ == "__main__":
     swarm = ScalpingSwarm30()

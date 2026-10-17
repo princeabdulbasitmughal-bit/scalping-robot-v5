@@ -23,20 +23,40 @@ CREATE_NO_WINDOW         = 0x08000000
 
 flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
 
-print(f"Launching supervisor with {exe} ...")
-try:
-    with open(BASE / "supervisor.log", "a") as log_f:
+
+def get_launch_flags() -> int:
+    """Return process creation flags for detached background execution."""
+    return flags
+
+
+def get_supervisor_command() -> list:
+    """Return command list for launching supervisor."""
+    return [exe, str(SUP)]
+
+
+def launch_supervisor(log_path: Path = None):
+    """Launch supervisor as a detached background process."""
+    target_log = log_path if log_path is not None else (BASE / "supervisor.log")
+    with open(target_log, "a", encoding="utf-8") as log_f:
         proc = subprocess.Popen(
-            [exe, str(SUP)],
+            get_supervisor_command(),
             cwd=str(BASE),
-            creationflags=flags,
+            creationflags=get_launch_flags(),
             close_fds=True,
             stdin=subprocess.DEVNULL,
             stdout=log_f,
             stderr=subprocess.STDOUT,
         )
-    print(f"Supervisor launched PID={proc.pid}")
-    print("Bootstrap complete. Supervisor runs independently.")
-except Exception as e:
-    print(f"[bootstrap_launch] Failed to launch supervisor: {e}")
-    sys.exit(1)
+    return proc
+
+
+if __name__ == "__main__":
+    print(f"Launching supervisor with {exe} ...")
+    try:
+        proc = launch_supervisor()
+        print(f"Supervisor launched PID={proc.pid}")
+        print("Bootstrap complete. Supervisor runs independently.")
+    except Exception as e:
+        print(f"[bootstrap_launch] Failed to launch supervisor: {e}")
+        sys.exit(1)
+

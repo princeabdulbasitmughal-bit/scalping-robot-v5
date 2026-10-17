@@ -10,6 +10,8 @@ import time
 import json
 import random
 import logging
+import math
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -23,6 +25,7 @@ STATUS_FILE = Path(__file__).resolve().parent.parent / "live_status.json"
 
 class ScalpingLiveRunner:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self._lock = threading.RLock()
         self.robot = ScalpingRobotV5(config)
         self.running = False
         self.bars = []
@@ -34,6 +37,7 @@ class ScalpingLiveRunner:
         self.winning_trades_count = 0
         self.daily_pnl = 0.0
         self.last_bar_time = time.time()
+
         
         # Seed initial bars
         now = time.time()
@@ -51,14 +55,16 @@ class ScalpingLiveRunner:
         self.last_bar_time = now
             
     def update_tick(self, tick_price: Optional[float] = None) -> Dict[str, Any]:
-        try:
-            now = time.time()
-            if tick_price is None:
-                # Simulate high frequency tick micro-movement
-                delta = random.gauss(0, 0.25)
-                self.current_price = round(self.current_price + delta, 2)
-            else:
-                self.current_price = tick_price
+        with self._lock:
+            try:
+                now = time.time()
+                if tick_price is None or not isinstance(tick_price, (int, float)) or not math.isfinite(tick_price) or tick_price <= 0:
+                    # Simulate high frequency tick micro-movement
+                    delta = random.gauss(0, 0.25)
+                    self.current_price = round(self.current_price + delta, 2)
+                else:
+                    self.current_price = round(float(tick_price), 2)
+
                 
             # Manage candlestick rollover
             if (now - self.last_bar_time) >= 60.0 or not self.bars:
@@ -191,7 +197,34 @@ class ScalpingLiveRunner:
                 "error": str(exc)
             }
 
+    def get_state(self) -> Dict[str, Any]:
+        """Return thread-safe snapshot of live runner state."""
+        with self._lock:
+            return {
+                "current_price": self.current_price,
+                "balance": round(self.balance, 2),
+                "equity": round(self.equity, 2),
+                "daily_pnl": round(self.daily_pnl, 2),
+                "open_positions_count": len(self.robot.open_positions),
+                "total_trades_count": self.total_trades_count,
+                "winning_trades_count": self.winning_trades_count,
+                "bars_count": len(self.bars),
+            }
+
+    def reset(self, balance: float = 10000.0) -> None:
+        """Reset live runner state and positions."""
+        with self._lock:
+            self.balance = float(balance) if math.isfinite(balance) and balance > 0 else 10000.0
+            self.equity = self.balance
+            self.daily_pnl = 0.0
+            self.total_trades_count = 0
+            self.winning_trades_count = 0
+            self.robot.open_positions = []
+            self.trades_history = []
+
+
 if __name__ == "__main__":
+
     runner = ScalpingLiveRunner()
     print("Scalping Robot V5 Live Runner Initialized.")
     for _ in range(5):

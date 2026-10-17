@@ -9,7 +9,9 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 from collections import deque
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any, Dict
+import threading
+
 
 try:
     import psutil
@@ -75,7 +77,12 @@ def calculate_backoff(consecutive_restarts: int) -> int:
     Exponential backoff:
     restart_delay = min(300, 30 * (2 ** consecutive_restarts))
     """
-    return min(300, int(30 * (2 ** consecutive_restarts)))
+    try:
+        count = max(0, int(consecutive_restarts))
+    except (ValueError, TypeError):
+        count = 0
+    return min(300, int(30 * (2 ** count)))
+
 
 
 def _memory_check(proc=None) -> float:
@@ -354,7 +361,10 @@ class WatchdogRunner:
     """
     Watchdog v2 Systems Engineer - Intelligent restart logic & self-healing supervisor.
     """
-    def __init__(self):
+    def __init__(self, status_file: Optional[Path] = None, log_file: Optional[Path] = None):
+        self.status_file = Path(status_file) if status_file is not None else STATUS_FILE
+        self.log_file = Path(log_file) if log_file is not None else WATCHDOG_LOG
+        self._lock = threading.RLock()
         self.tr_p = None
         self.tr_out = None
         self.tr_err = None
@@ -367,6 +377,18 @@ class WatchdogRunner:
         self.cycle: int = 0
         self.uv_consecutive_restarts: int = 0
 
+    def get_status(self) -> Dict[str, Any]:
+        """Return thread-safe snapshot of watchdog runner status."""
+        with self._lock:
+            return {
+                "cycle": self.cycle,
+                "consecutive_restarts": self.consecutive_restarts,
+                "restart_count": self.restart_count,
+                "last_restart_time": self.last_restart_time,
+                "uv_consecutive_restarts": self.uv_consecutive_restarts,
+                "status_file": str(self.status_file),
+            }
+
     def _memory_check(self, proc=None) -> float:
         """Use psutil if available, check process memory in MB."""
         target = proc if proc is not None else self.tr_p
@@ -377,7 +399,7 @@ class WatchdogRunner:
         Health check before restart: read live_status.json,
         if ok=true and timestamp < 60s ago, DON'T restart (returns True).
         """
-        return health_check(STATUS_FILE)
+        return health_check(self.status_file)
 
     def _check_health(self) -> bool:
         """Alias for health_check()."""
@@ -385,7 +407,8 @@ class WatchdogRunner:
 
     def status_age(self) -> float:
         """Return age of live_status.json in seconds."""
-        return status_age(STATUS_FILE)
+        return status_age(self.status_file)
+
 
     def detect_restart_reason(self, proc=None) -> Optional[str]:
         """

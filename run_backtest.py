@@ -12,8 +12,22 @@ RESULTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backtes
 
 
 def simulate_price(n_ticks=2000, start_price=2400.0):
-    prices = [start_price]
-    for i in range(n_ticks - 1):
+    try:
+        ticks = int(n_ticks)
+    except (ValueError, TypeError):
+        ticks = 2000
+    if ticks < 1:
+        ticks = 1
+
+    try:
+        sp = float(start_price)
+        if not math.isfinite(sp) or sp <= 0:
+            sp = 2400.0
+    except (ValueError, TypeError):
+        sp = 2400.0
+
+    prices = [sp]
+    for i in range(ticks - 1):
         # Session-aware volatility
         session_vol = 0.08
         if i % 1440 < 540:    # Tokyo hours
@@ -32,28 +46,64 @@ def bb_signal(prices, i, period=20):
     if period <= 0 or not prices or i < period or i >= len(prices):
         return 'HOLD'
     window = prices[i - period:i]
-    if not window:
+    if not window or any(not math.isfinite(x) for x in window):
         return 'HOLD'
+    target_price = prices[i]
+    if not math.isfinite(target_price):
+        return 'HOLD'
+
     mean = sum(window) / len(window)
     variance = sum((x - mean) ** 2 for x in window) / len(window)
-    std = math.sqrt(variance)
+    std = math.sqrt(max(0.0, variance))
     if std < 0.001:
         return 'HOLD'
     upper = mean + 2 * std
     lower = mean - 2 * std
-    price = prices[i]
-    if price <= lower:
+    if target_price <= lower:
         return 'BUY'
-    elif price >= upper:
+    elif target_price >= upper:
         return 'SELL'
     return 'HOLD'
 
 
-def run_backtest(n_ticks=2000, sl_pips=30.0, tp_pips=45.0, lot=0.02, start_balance=10000.0):
+
+def run_backtest(n_ticks=2000, sl_pips=30.0, tp_pips=45.0, lot=0.02, start_balance=10000.0, save_results=True, quiet=False):
+    try:
+        ticks = max(25, int(n_ticks))
+    except (ValueError, TypeError):
+        ticks = 2000
+
+    try:
+        sl = float(sl_pips)
+        if not math.isfinite(sl) or sl <= 0:
+            sl = 30.0
+    except (ValueError, TypeError):
+        sl = 30.0
+
+    try:
+        tp = float(tp_pips)
+        if not math.isfinite(tp) or tp <= 0:
+            tp = 45.0
+    except (ValueError, TypeError):
+        tp = 45.0
+
+    try:
+        lot_size = float(lot)
+        if not math.isfinite(lot_size) or lot_size <= 0:
+            lot_size = 0.02
+    except (ValueError, TypeError):
+        lot_size = 0.02
+
+    try:
+        balance = float(start_balance)
+        if not math.isfinite(balance) or balance <= 0:
+            balance = 10000.0
+    except (ValueError, TypeError):
+        balance = 10000.0
+
     random.seed(42)
-    prices = simulate_price(n_ticks)
-    balance = start_balance
-    peak_balance = start_balance
+    prices = simulate_price(ticks)
+    peak_balance = balance
     max_drawdown = 0.0
     trades = []
     in_trade = None
@@ -79,15 +129,15 @@ def run_backtest(n_ticks=2000, sl_pips=30.0, tp_pips=45.0, lot=0.02, start_balan
             else:
                 pips_moved = entry_price - price
 
-            pnl = pips_moved * lot * 100
+            pnl = pips_moved * lot_size * 100
             duration = i - entry_i
             closed = False
             reason = ''
 
-            if pips_moved >= tp_pips:
+            if pips_moved >= tp:
                 reason = 'TP'
                 closed = True
-            elif pips_moved <= -sl_pips:
+            elif pips_moved <= -sl:
                 reason = 'SL'
                 closed = True
             elif duration > 180:
@@ -120,7 +170,7 @@ def run_backtest(n_ticks=2000, sl_pips=30.0, tp_pips=45.0, lot=0.02, start_balan
 
     results = {
         'timestamp': datetime.now(timezone.utc).isoformat(),
-        'n_ticks': n_ticks,
+        'n_ticks': ticks,
         'total_trades': len(trades),
         'wins': wins,
         'losses': losses,
@@ -131,30 +181,54 @@ def run_backtest(n_ticks=2000, sl_pips=30.0, tp_pips=45.0, lot=0.02, start_balan
         'profit_factor': profit_factor,
     }
 
-    print("=" * 50)
-    print("BACKTEST RESULTS - Gold Scalping Robot")
-    print("=" * 50)
-    print("Ticks simulated : {}".format(n_ticks))
-    print("Total Trades    : {}".format(results['total_trades']))
-    print("Wins            : {} | Losses: {}".format(wins, losses))
-    print("Win Rate        : {}%".format(win_rate))
-    print("Total PnL       : ${:.2f}".format(total_pnl))
-    print("Final Balance   : ${:.2f}".format(balance))
-    print("Max Drawdown    : {:.2f}%".format(max_drawdown))
-    print("Profit Factor   : {}".format(profit_factor))
-    print("=" * 50)
+    if not quiet:
+        print("=" * 50)
+        print("BACKTEST RESULTS - Gold Scalping Robot")
+        print("=" * 50)
+        print("Ticks simulated : {}".format(ticks))
+        print("Total Trades    : {}".format(results['total_trades']))
+        print("Wins            : {} | Losses: {}".format(wins, losses))
+        print("Win Rate        : {}%".format(win_rate))
+        print("Total PnL       : ${:.2f}".format(total_pnl))
+        print("Final Balance   : ${:.2f}".format(balance))
+        print("Max Drawdown    : {:.2f}%".format(max_drawdown))
+        print("Profit Factor   : {}".format(profit_factor))
+        print("=" * 50)
 
-    try:
-        tmp_file = f"{RESULTS_FILE}.tmp.{os.getpid()}"
-        with open(tmp_file, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2)
-        os.replace(tmp_file, RESULTS_FILE)
-        print("Results saved to backtest_results.json")
-    except Exception as e:
-        print("Could not save results: {}".format(e))
+    if save_results:
+        try:
+            tmp_file = f"{RESULTS_FILE}.tmp.{os.getpid()}"
+            with open(tmp_file, 'w', encoding='utf-8') as f:
+                json.dump(results, f, indent=2)
+            os.replace(tmp_file, RESULTS_FILE)
+            if not quiet:
+                print("Results saved to backtest_results.json")
+        except Exception as e:
+            if not quiet:
+                print("Could not save results: {}".format(e))
 
     return results
 
 
 if __name__ == '__main__':
-    run_backtest()
+    import argparse
+    parser = argparse.ArgumentParser(description="Run backtester for Gold Scalping Robot")
+    parser.add_argument("--ticks", type=int, default=2000, help="Number of ticks")
+    parser.add_argument("--sl", type=float, default=30.0, help="Stop loss in pips")
+    parser.add_argument("--tp", type=float, default=45.0, help="Take profit in pips")
+    parser.add_argument("--lot", type=float, default=0.02, help="Lot size")
+    parser.add_argument("--balance", type=float, default=10000.0, help="Starting balance")
+    parser.add_argument("--no-save", action="store_true", help="Do not overwrite backtest_results.json")
+    parser.add_argument("--quiet", action="store_true", help="Suppress console prints")
+    args = parser.parse_args()
+
+    run_backtest(
+        n_ticks=args.ticks,
+        sl_pips=args.sl,
+        tp_pips=args.tp,
+        lot=args.lot,
+        start_balance=args.balance,
+        save_results=not args.no_save,
+        quiet=args.quiet
+    )
+
