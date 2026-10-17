@@ -29,13 +29,14 @@ class ProfitOptimizer:
     # ── Win/Loss streak tracking ──────────────────────────────────────────────
     def record_result(self, won: bool):
         with self._lock:
-            if won:
+            w = bool(won)
+            if w:
                 self._win_streak += 1
                 self._loss_streak = 0
             else:
                 self._loss_streak += 1
                 self._win_streak = 0
-            self._session_results.append(1 if won else 0)
+            self._session_results.append(1 if w else 0)
 
     # ── Lot size modifier from streaks ────────────────────────────────────────
     def streak_lot_modifier(self) -> float:
@@ -57,34 +58,52 @@ class ProfitOptimizer:
         with self._lock:
             return self._loss_streak >= 3
 
+    def is_entry_blocked(self) -> bool:
+        """Unified risk interface: profit optimizer modulates lots, does not block."""
+        return False
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
+
     # ── Floating PnL reversal guard ───────────────────────────────────────────
     def update_peak_float(self, ticket: str, current_float_pnl: float):
         """Track peak floating PnL per position."""
-        if not isinstance(current_float_pnl, (int, float)) or not math.isfinite(current_float_pnl):
+        if (
+            current_float_pnl is None
+            or isinstance(current_float_pnl, bool)
+            or not isinstance(current_float_pnl, (int, float))
+            or not math.isfinite(current_float_pnl)
+        ):
             return
         with self._lock:
-            prev_peak = self._peak_floating_pnl.get(ticket, 0.0)
+            prev_peak = self._peak_floating_pnl.get(str(ticket), 0.0)
             if current_float_pnl > prev_peak:
-                self._peak_floating_pnl[ticket] = float(current_float_pnl)
+                self._peak_floating_pnl[str(ticket)] = float(current_float_pnl)
 
     def should_close_reversal(self, ticket: str, current_float_pnl: float, threshold: float = 0.5) -> bool:
         """
         Return True if floating PnL has reversed by > threshold% of its peak.
         E.g. peak was $20, now $8 → reversed 60% → close.
         """
-        if not isinstance(current_float_pnl, (int, float)) or not math.isfinite(current_float_pnl):
+        if (
+            current_float_pnl is None
+            or isinstance(current_float_pnl, bool)
+            or not isinstance(current_float_pnl, (int, float))
+            or not math.isfinite(current_float_pnl)
+        ):
             return False
         with self._lock:
-            peak = self._peak_floating_pnl.get(ticket, 0.0)
+            peak = self._peak_floating_pnl.get(str(ticket), 0.0)
             if peak <= 0 or current_float_pnl >= peak:
                 return False
+            thresh = float(threshold) if isinstance(threshold, (int, float)) and not isinstance(threshold, bool) and threshold > 0 else 0.5
             reversal_pct = (peak - current_float_pnl) / peak
-            return reversal_pct >= threshold
+            return reversal_pct >= thresh
 
     def cleanup_ticket(self, ticket: str):
         with self._lock:
-            self._peak_floating_pnl.pop(ticket, None)
-            self._partial_closed.pop(ticket, None)
+            self._peak_floating_pnl.pop(str(ticket), None)
+            self._partial_closed.pop(str(ticket), None)
 
     # ── Partial profit levels ─────────────────────────────────────────────────
     def get_partial_close_level(
@@ -107,20 +126,38 @@ class ProfitOptimizer:
         if base_lot is not None:
             lot_size = base_lot
 
-        if not isinstance(lot_size, (int, float)) or not math.isfinite(lot_size) or lot_size < 0.02:
+        if (
+            lot_size is None
+            or isinstance(lot_size, bool)
+            or not isinstance(lot_size, (int, float))
+            or not math.isfinite(lot_size)
+            or lot_size < 0.02
+        ):
             return None  # too small for partial close
-        if not isinstance(pips_profit, (int, float)) or not math.isfinite(pips_profit):
+        if (
+            pips_profit is None
+            or isinstance(pips_profit, bool)
+            or not isinstance(pips_profit, (int, float))
+            or not math.isfinite(pips_profit)
+        ):
             return None
-        if not isinstance(tp_pips, (int, float)) or not math.isfinite(tp_pips) or tp_pips <= 0:
+        if (
+            tp_pips is None
+            or isinstance(tp_pips, bool)
+            or not isinstance(tp_pips, (int, float))
+            or not math.isfinite(tp_pips)
+            or tp_pips <= 0
+        ):
             return None
 
         with self._lock:
-            if self._partial_closed.get(ticket, False):
+            t = str(ticket)
+            if self._partial_closed.get(t, False):
                 return None  # already partially closed
 
             pct = pips_profit / tp_pips
             if pct >= 0.4:
-                self._partial_closed[ticket] = True
+                self._partial_closed[t] = True
                 return round(lot_size * 0.33, 2)
 
         return None
@@ -137,12 +174,25 @@ class ProfitOptimizer:
         If trade is near TP and market is trending → extend TP by 20%.
         Prevents premature exit in strong trending markets.
         """
-        if not isinstance(base_tp, (int, float)) or not math.isfinite(base_tp) or base_tp <= 0:
+        if (
+            base_tp is None
+            or isinstance(base_tp, bool)
+            or not isinstance(base_tp, (int, float))
+            or not math.isfinite(base_tp)
+            or base_tp <= 0
+        ):
             return 45.0
-        if not isinstance(pips_profit, (int, float)) or not math.isfinite(pips_profit):
+        if (
+            pips_profit is None
+            or isinstance(pips_profit, bool)
+            or not isinstance(pips_profit, (int, float))
+            or not math.isfinite(pips_profit)
+        ):
             return base_tp
 
-        if market_regime in ("TRENDING_UP", "TRENDING_DOWN") and win_streak >= 2:
+        ws = int(win_streak) if isinstance(win_streak, (int, float)) and not isinstance(win_streak, bool) else 0
+
+        if market_regime in ("TRENDING_UP", "TRENDING_DOWN") and ws >= 2:
             if pips_profit >= base_tp * 0.8:  # 80% to TP
                 return round(base_tp * 1.2, 1)  # extend 20%
         return base_tp
@@ -150,9 +200,17 @@ class ProfitOptimizer:
     # ── Daily target scaling ──────────────────────────────────────────────────
     def daily_target_lot_scale(self, daily_pnl: float, daily_target: float) -> float:
         """Reduce lot size as we approach daily target."""
-        if not isinstance(daily_pnl, (int, float)) or not isinstance(daily_target, (int, float)):
-            return 1.0
-        if not math.isfinite(daily_pnl) or not math.isfinite(daily_target) or daily_target <= 0:
+        if (
+            daily_pnl is None
+            or daily_target is None
+            or isinstance(daily_pnl, bool)
+            or isinstance(daily_target, bool)
+            or not isinstance(daily_pnl, (int, float))
+            or not isinstance(daily_target, (int, float))
+            or not math.isfinite(daily_pnl)
+            or not math.isfinite(daily_target)
+            or daily_target <= 0
+        ):
             return 1.0
         pct = daily_pnl / daily_target
         if pct >= 0.75:

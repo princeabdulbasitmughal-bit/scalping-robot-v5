@@ -8,6 +8,7 @@ Features:
   - Friday afternoon and Monday morning filters
 """
 
+import math
 import threading
 import logging
 from datetime import datetime, timezone
@@ -71,7 +72,7 @@ class SessionOptimizer:
             self._total_optimizations = 0
 
     def _normalize_dt(self, now_dt: Optional[datetime] = None) -> datetime:
-        if now_dt is not None:
+        if now_dt is not None and not isinstance(now_dt, bool) and isinstance(now_dt, datetime):
             return now_dt.astimezone(timezone.utc) if now_dt.tzinfo else now_dt.replace(tzinfo=timezone.utc)
         return datetime.now(timezone.utc)
 
@@ -197,6 +198,31 @@ class SessionOptimizer:
         """Adjust SL/TP based on session volatility profile."""
         with self._lock:
             self._total_optimizations += 1
+            if (
+                base_sl is None
+                or isinstance(base_sl, bool)
+                or not isinstance(base_sl, (int, float))
+                or not math.isfinite(base_sl)
+                or base_sl <= 0
+            ):
+                base_sl = 30.0
+            if (
+                base_tp is None
+                or isinstance(base_tp, bool)
+                or not isinstance(base_tp, (int, float))
+                or not math.isfinite(base_tp)
+                or base_tp <= 0
+            ):
+                base_tp = 45.0
+            if (
+                rr_ratio is None
+                or isinstance(rr_ratio, bool)
+                or not isinstance(rr_ratio, (int, float))
+                or not math.isfinite(rr_ratio)
+                or rr_ratio <= 0
+            ):
+                rr_ratio = 1.5
+
             info = self.get_current_session_info(now_dt=now_dt)
             mult = info.get("pip_multiplier", 1.0)
             if mult <= 0.0:
