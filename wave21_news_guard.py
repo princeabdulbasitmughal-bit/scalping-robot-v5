@@ -20,75 +20,85 @@ _OVERRIDE_FILE   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "new
 class NewsGuard:
     """Blocks trading during high-impact news windows."""
 
-    def __init__(self, status_file: str = None, override_file: str = None):
+    def __init__(self, status_file: str = None, override_file: str = None, cache_ttl: float = 60.0):
         self._status_file = status_file or _NEWS_STATUS_FILE
         self._override_file = override_file or _OVERRIDE_FILE
         self._last_check_time: float = 0.0
         self._cached_avoid: bool = False
         self._cached_reason: str = "no data"
-        self._cache_ttl: float = 60.0   # re-read file every 60 s
+        self._cache_ttl: float = float(cache_ttl) if isinstance(cache_ttl, (int, float)) and not isinstance(cache_ttl, bool) and cache_ttl >= 0 else 60.0
         self._blocked_count: int = 0
         self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
-    def _load(self) -> None:
+    def _load(self, now_ts: float = None) -> None:
         """Load news_status.json with TTL caching."""
-        now = time.time()
-        if now - self._last_check_time < self._cache_ttl:
-            return
-        self._last_check_time = now
-
-        # Manual override: {"override": true} → always allow
-        try:
-            if os.path.exists(self._override_file):
-                with open(self._override_file, "r", encoding="utf-8") as f:
-                    ov = json.load(f)
-                if ov.get("override", False):
-                    self._cached_avoid = False
-                    self._cached_reason = "manual override active"
-                    return
-        except Exception as e:
-            logger.warning(f"[NEWS GUARD] Override file parse error: {e}")
-
-        # Read news_status.json
-        try:
-            if not os.path.exists(self._status_file):
-                self._cached_avoid = False
-                self._cached_reason = "news_status.json not found — allow"
+        with self._lock:
+            now = time.time() if (now_ts is None or isinstance(now_ts, bool)) else float(now_ts)
+            if (now - self._last_check_time) < self._cache_ttl and self._last_check_time > 0:
                 return
-            with open(self._status_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            self._last_check_time = now
 
-            avoid = bool(data.get("avoid_trading", False))
-            headlines = data.get("last_headlines", [])
-            last_checked = data.get("last_checked", "")
+            # Manual override: {"override": true} → always allow
+            try:
+                if os.path.exists(self._override_file):
+                    with open(self._override_file, "r", encoding="utf-8") as f:
+                        ov = json.load(f)
+                    if ov.get("override", False):
+                        self._cached_avoid = False
+                        self._cached_reason = "manual override active"
+                        return
+            except Exception as e:
+                logger.warning(f"[NEWS GUARD] Override file parse error: {e}")
 
-            if avoid:
-                snippet = headlines[0][:60] if headlines else "high-impact event"
-                self._cached_reason = f"NEWS GUARD: {snippet} | checked {last_checked}"
-                self._cached_avoid = True
-            else:
+            # Read news_status.json
+            try:
+                if not os.path.exists(self._status_file):
+                    self._cached_avoid = False
+                    self._cached_reason = "news_status.json not found — allow"
+                    return
+                with open(self._status_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                avoid = bool(data.get("avoid_trading", False))
+                headlines = data.get("last_headlines", [])
+                last_checked = data.get("last_checked", "")
+
+                if avoid:
+                    snippet = headlines[0][:60] if (isinstance(headlines, list) and headlines and isinstance(headlines[0], str)) else "high-impact event"
+                    self._cached_reason = f"NEWS GUARD: {snippet} | checked {last_checked}"
+                    self._cached_avoid = True
+                else:
+                    self._cached_avoid = False
+                    self._cached_reason = f"news clear | checked {last_checked}"
+
+            except Exception as exc:
+                # If we can't read, allow trading (fail-open)
                 self._cached_avoid = False
-                self._cached_reason = f"news clear | checked {last_checked}"
-
-        except Exception as exc:
-            # If we can't read, allow trading (fail-open)
-            self._cached_avoid = False
-            self._cached_reason = f"news read error ({exc}) — allow"
+                self._cached_reason = f"news read error ({exc}) — allow"
 
     # ------------------------------------------------------------------
-    def is_trading_allowed(self) -> tuple:
+    def is_trading_allowed(self, now_ts: float = None) -> tuple:
         """
         Returns (allowed: bool, reason: str).
         Call before entering a trade.
         """
         with self._lock:
-            self._load()
+            self._load(now_ts=now_ts)
             if self._cached_avoid:
                 self._blocked_count += 1
                 logger.info(f"[NEWS GUARD] BLOCKED #{self._blocked_count}: {self._cached_reason}")
                 return False, self._cached_reason
             return True, self._cached_reason
+
+    def is_entry_blocked(self, now_ts: float = None) -> bool:
+        """Unified risk interface check for trade entry blocking."""
+        allowed, _ = self.is_trading_allowed(now_ts=now_ts)
+        return not allowed
+
+    def is_blocked(self, now_ts: float = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(now_ts=now_ts)
 
     def set_override(self, avoid: bool, reason: str = "test override") -> None:
         """Set explicit avoid/allow state for testing or manual control."""
@@ -105,10 +115,10 @@ class NewsGuard:
             self._cached_reason = "no data"
             self._blocked_count = 0
 
-    def info(self) -> dict:
+    def info(self, now_ts: float = None) -> dict:
         """Summary dict for live_status.json."""
         with self._lock:
-            self._load()
+            self._load(now_ts=now_ts)
             return {
                 "avoid_trading": self._cached_avoid,
                 "reason": self._cached_reason,

@@ -37,13 +37,13 @@ class SpikeFilter:
         cluster_window_sec: float = 300.0,     # 5-min spike cluster window
         cluster_count_limit: int = 3,          # block if ≥3 spikes in window
     ):
-        self.spike_ratio_threshold = spike_ratio_threshold
-        self.cooldown_sec = cooldown_sec
-        self.lookback = lookback
-        self.cluster_window_sec = cluster_window_sec
-        self.cluster_count_limit = cluster_count_limit
+        self.spike_ratio_threshold = float(spike_ratio_threshold) if isinstance(spike_ratio_threshold, (int, float)) and not isinstance(spike_ratio_threshold, bool) and spike_ratio_threshold > 0 else 4.0
+        self.cooldown_sec = float(cooldown_sec) if isinstance(cooldown_sec, (int, float)) and not isinstance(cooldown_sec, bool) and cooldown_sec >= 0 else 90.0
+        self.lookback = int(lookback) if isinstance(lookback, (int, float)) and not isinstance(lookback, bool) and lookback > 0 else 20
+        self.cluster_window_sec = float(cluster_window_sec) if isinstance(cluster_window_sec, (int, float)) and not isinstance(cluster_window_sec, bool) and cluster_window_sec >= 0 else 300.0
+        self.cluster_count_limit = int(cluster_count_limit) if isinstance(cluster_count_limit, (int, float)) and not isinstance(cluster_count_limit, bool) and cluster_count_limit > 0 else 3
 
-        self._recent_changes: deque = deque(maxlen=lookback)
+        self._recent_changes: deque = deque(maxlen=self.lookback)
         self._spike_timestamps: deque = deque(maxlen=20)
         self._blocked_until: float = 0.0
         self._last_seen_price: float = 0.0
@@ -55,11 +55,20 @@ class SpikeFilter:
         Call each tick before generating a signal.
         """
         try:
-            if not isinstance(current_price, (int, float)) or not isinstance(prev_price, (int, float)) or not math.isfinite(current_price) or not math.isfinite(prev_price):
+            if (
+                current_price is None
+                or prev_price is None
+                or isinstance(current_price, bool)
+                or isinstance(prev_price, bool)
+                or not isinstance(current_price, (int, float))
+                or not isinstance(prev_price, (int, float))
+                or not math.isfinite(current_price)
+                or not math.isfinite(prev_price)
+            ):
                 return False, "SPIKE_FILTER_INVALID_PRICE"
 
             with self._lock:
-                now = time.time() if now_ts is None else float(now_ts)
+                now = time.time() if (now_ts is None or isinstance(now_ts, bool)) else float(now_ts)
                 tick_change = abs(current_price - prev_price)
 
                 # Feed the rolling window
@@ -117,13 +126,17 @@ class SpikeFilter:
         return self.check(current_price, prev_price)
 
     def is_blocked(self, now_ts: float = None) -> bool:
-        now = time.time() if now_ts is None else float(now_ts)
+        now = time.time() if (now_ts is None or isinstance(now_ts, bool)) else float(now_ts)
         with self._lock:
             return now < self._blocked_until
 
+    def is_entry_blocked(self, now_ts: float = None) -> bool:
+        """Alias conforming to unified risk filter interface."""
+        return self.is_blocked(now_ts=now_ts)
+
     def info(self, now_ts: float = None) -> dict:
         with self._lock:
-            now = time.time() if now_ts is None else float(now_ts)
+            now = time.time() if (now_ts is None or isinstance(now_ts, bool)) else float(now_ts)
             recent_spikes = [t for t in self._spike_timestamps if now - t <= self.cluster_window_sec]
             return {
                 "blocked": now < self._blocked_until,
