@@ -12,19 +12,25 @@ RESULTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backtes
 
 
 def simulate_price(n_ticks=2000, start_price=2400.0):
-    try:
-        ticks = int(n_ticks)
-    except (ValueError, TypeError):
+    if isinstance(n_ticks, bool):
         ticks = 2000
+    else:
+        try:
+            ticks = int(n_ticks)
+        except (ValueError, TypeError):
+            ticks = 2000
     if ticks < 1:
         ticks = 1
 
-    try:
-        sp = float(start_price)
-        if not math.isfinite(sp) or sp <= 0:
-            sp = 2400.0
-    except (ValueError, TypeError):
+    if isinstance(start_price, bool):
         sp = 2400.0
+    else:
+        try:
+            sp = float(start_price)
+            if not math.isfinite(sp) or sp <= 0:
+                sp = 2400.0
+        except (ValueError, TypeError):
+            sp = 2400.0
 
     prices = [sp]
     for i in range(ticks - 1):
@@ -66,40 +72,63 @@ def bb_signal(prices, i, period=20):
     return 'HOLD'
 
 
+def is_entry_blocked() -> bool:
+    """Backtesting module is an offline simulation harness and never blocks live entries."""
+    return False
+
+
+def is_blocked() -> bool:
+    return is_entry_blocked()
+
 
 def run_backtest(n_ticks=2000, sl_pips=30.0, tp_pips=45.0, lot=0.02, start_balance=10000.0, save_results=True, quiet=False, results_file=None):
-    try:
-        ticks = max(25, int(n_ticks))
-    except (ValueError, TypeError):
+    if isinstance(n_ticks, bool):
         ticks = 2000
+    else:
+        try:
+            ticks = max(25, int(n_ticks))
+        except (ValueError, TypeError):
+            ticks = 2000
 
-    try:
-        sl = float(sl_pips)
-        if not math.isfinite(sl) or sl <= 0:
-            sl = 30.0
-    except (ValueError, TypeError):
+    if isinstance(sl_pips, bool):
         sl = 30.0
+    else:
+        try:
+            sl = float(sl_pips)
+            if not math.isfinite(sl) or sl <= 0:
+                sl = 30.0
+        except (ValueError, TypeError):
+            sl = 30.0
 
-    try:
-        tp = float(tp_pips)
-        if not math.isfinite(tp) or tp <= 0:
-            tp = 45.0
-    except (ValueError, TypeError):
+    if isinstance(tp_pips, bool):
         tp = 45.0
+    else:
+        try:
+            tp = float(tp_pips)
+            if not math.isfinite(tp) or tp <= 0:
+                tp = 45.0
+        except (ValueError, TypeError):
+            tp = 45.0
 
-    try:
-        lot_size = float(lot)
-        if not math.isfinite(lot_size) or lot_size <= 0:
-            lot_size = 0.02
-    except (ValueError, TypeError):
+    if isinstance(lot, bool):
         lot_size = 0.02
+    else:
+        try:
+            lot_size = float(lot)
+            if not math.isfinite(lot_size) or lot_size <= 0:
+                lot_size = 0.02
+        except (ValueError, TypeError):
+            lot_size = 0.02
 
-    try:
-        balance = float(start_balance)
-        if not math.isfinite(balance) or balance <= 0:
-            balance = 10000.0
-    except (ValueError, TypeError):
+    if isinstance(start_balance, bool):
         balance = 10000.0
+    else:
+        try:
+            balance = float(start_balance)
+            if not math.isfinite(balance) or balance <= 0:
+                balance = 10000.0
+        except (ValueError, TypeError):
+            balance = 10000.0
 
     random.seed(42)
     prices = simulate_price(ticks)

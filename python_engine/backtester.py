@@ -781,11 +781,27 @@ class Backtester:
             print_summary=print_summary
         )
 
+    def is_entry_blocked(self) -> bool:
+        """Backtester is an analytical simulation engine and never blocks live trades."""
+        return False
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
+
 
 # Backward compatibility alias
 ScalpingBacktester = Backtester
 
 
+def is_entry_blocked() -> bool:
+    return False
+
+
+def is_blocked() -> bool:
+    return is_entry_blocked()
+
+
 if __name__ == "__main__":
     bt = Backtester({"symbol": "XAUUSD", "lot_size": 0.01})
     res = bt.run_backtest(n_ticks=1000)
+
