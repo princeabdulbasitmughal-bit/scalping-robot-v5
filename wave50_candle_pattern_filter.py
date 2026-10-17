@@ -4,7 +4,7 @@ Detects last candle pattern (doji, hammer, bearish_engulfing, bullish_engulfing)
 If pattern contradicts signal direction -> block entry.
 Pattern    | Bias     | Blocks
 -----------|----------|--------------------
-Doji       | NEUTRAL  | blocks both (indecision)
+Doji       | INDECISION | blocks both (indecision)
 Hammer     | BULLISH  | blocks SELL
 Inv Hammer | BEARISH  | blocks BUY
 Bull Engulf| BULLISH  | blocks SELL
@@ -14,29 +14,66 @@ Bear Engulf| BEARISH  | blocks BUY
 import math
 import threading
 import time
+import logging
 from collections import deque
+from typing import Optional, Tuple, Any, Dict
+
+logger = logging.getLogger(__name__)
 
 
 class CandlePatternFilter:
-    """Analyses last 2 synthetic candles built from price ticks."""
+    """
+    Analyses last 2 synthetic candles built from price ticks or explicit OHLC bars.
+    Thread-safe with RLock and supports deterministic timestamp injection.
+    """
 
     def __init__(self):
         # We accumulate ticks into 1-min candles via tick timestamp
-        self._ticks: deque = deque(maxlen=500)
+        self._ticks: deque[Tuple[float, float]] = deque(maxlen=500)
         self._last_pattern = "NONE"
         self._last_bias    = "NEUTRAL"   # BULLISH / BEARISH / NEUTRAL / INDECISION
-        self._lock         = threading.Lock()
+        self._total_blocks = 0
+        self._lock         = threading.RLock()
         self._last_update  = 0.0
 
-    # ------------------------------------------------------------------
-    def update(self, price: float) -> None:
-        """Feed each tick price."""
-        if not math.isfinite(price):
-            return
+    def reset(self) -> None:
+        """Thread-safe reset of pattern detector state."""
         with self._lock:
-            self._ticks.append((time.time(), price))
+            self._ticks.clear()
+            self._last_pattern = "NONE"
+            self._last_bias = "NEUTRAL"
+            self._total_blocks = 0
+            self._last_update = 0.0
+
+    # ------------------------------------------------------------------
+    def update(self, price: Any, now_ts: Optional[float] = None) -> None:
+        """Feed each tick price."""
+        if price is None or isinstance(price, bool):
+            return
+        try:
+            p = float(price)
+            if not math.isfinite(p) or p <= 0:
+                return
+        except (ValueError, TypeError):
+            return
+
+        ts = float(now_ts) if now_ts is not None else time.time()
+        with self._lock:
+            self._ticks.append((ts, p))
+            self._last_update = ts
+            self._analyse(now_ts=ts)
+
+    def update_candle(self, o: float, h: float, l: float, c: float) -> None:
+        """Directly inject an OHLC candle and analyze its pattern."""
+        if not (math.isfinite(o) and math.isfinite(h) and math.isfinite(l) and math.isfinite(c)):
+            return
+        if h < l or o <= 0 or c <= 0 or h <= 0 or l <= 0:
+            return
+
+        with self._lock:
+            c2 = {"o": float(o), "h": float(h), "l": float(l), "c": float(c)}
+            self._classify_candle(c2, None)
             self._last_update = time.time()
-            self._analyse()
 
     def _build_candle(self, ticks):
         """Build O/H/L/C from a list of (ts, price) tuples."""
@@ -50,24 +87,15 @@ class CandlePatternFilter:
             "c": prices[-1],
         }
 
-    def _analyse(self):
-        now = time.time()
-        # Split ticks into two 30-sec candles
-        c2_ticks = [(t, p) for t, p in self._ticks if now - t <= 30]
-        c1_ticks = [(t, p) for t, p in self._ticks if 30 < now - t <= 60]
-        c2 = self._build_candle(c2_ticks)
-        c1 = self._build_candle(c1_ticks)
-        if c2 is None:
-            self._last_pattern = "NONE"
-            self._last_bias    = "NEUTRAL"
-            return
-        # Analyse c2 (most recent candle)
+    def _classify_candle(self, c2: Dict[str, float], c1: Optional[Dict[str, float]]) -> None:
+        """Internal candle pattern classifier."""
         body = abs(c2["c"] - c2["o"])
         rng  = c2["h"] - c2["l"]
         if rng == 0:
             self._last_pattern = "FLAT"
             self._last_bias    = "NEUTRAL"
             return
+
         body_ratio = body / rng
         upper_wick = c2["h"] - max(c2["o"], c2["c"])
         lower_wick = min(c2["o"], c2["c"]) - c2["l"]
@@ -108,33 +136,78 @@ class CandlePatternFilter:
         self._last_pattern = "NORMAL"
         self._last_bias    = "BULLISH" if bullish_candle else "BEARISH"
 
+    def _analyse(self, now_ts: Optional[float] = None) -> None:
+        now = float(now_ts) if now_ts is not None else time.time()
+        # Split ticks into two 30-sec candles
+        c2_ticks = [(t, p) for t, p in self._ticks if now - t <= 30]
+        c1_ticks = [(t, p) for t, p in self._ticks if 30 < now - t <= 60]
+        c2 = self._build_candle(c2_ticks)
+        c1 = self._build_candle(c1_ticks)
+        if c2 is None:
+            self._last_pattern = "NONE"
+            self._last_bias    = "NEUTRAL"
+            return
+
+        self._classify_candle(c2, c1)
+
     # ------------------------------------------------------------------
-    def is_signal_blocked(self, signal: str) -> bool:
+    def is_signal_blocked(self, signal: Any) -> bool:
         """Return True if candle pattern contradicts the proposed signal direction."""
-        sig = str(signal).strip().upper()
+        sig = str(signal).strip().upper() if signal is not None else ""
         with self._lock:
             bias = self._last_bias
+            pattern = self._last_pattern
+
         if bias == "INDECISION":
+            with self._lock:
+                self._total_blocks += 1
+            logger.info(f"[WAVE50] Entry BLOCKED — DOJI pattern indecision")
             return True   # doji — block any entry
-        if sig == "BUY"  and bias == "BEARISH":
+
+        if sig == "BUY" and bias == "BEARISH":
+            with self._lock:
+                self._total_blocks += 1
+            logger.info(f"[WAVE50] BUY BLOCKED — bearish {pattern} pattern")
             return True
+
         if sig == "SELL" and bias == "BULLISH":
+            with self._lock:
+                self._total_blocks += 1
+            logger.info(f"[WAVE50] SELL BLOCKED — bullish {pattern} pattern")
             return True
+
         return False
 
     def get_bias(self) -> str:
         with self._lock:
             return self._last_bias
 
-    def is_entry_blocked(self, signal: str = "BUY") -> bool:
+    def is_entry_blocked(self, signal: Any = "BUY") -> bool:
+        """Alias for is_signal_blocked."""
         return self.is_signal_blocked(signal)
+
+    def is_blocked(self, signal: Any = "BUY") -> bool:
+        """Alias for is_signal_blocked."""
+        return self.is_signal_blocked(signal)
+
+    def is_trading_allowed(self, signal: Any = "BUY") -> Tuple[bool, str]:
+        """Returns (True, '') if allowed, (False, reason) if blocked."""
+        blocked = self.is_signal_blocked(signal)
+        if blocked:
+            with self._lock:
+                return False, f"CANDLE_PATTERN: {self._last_pattern} contradicts {signal}"
+        return True, ""
 
     def info(self) -> dict:
         with self._lock:
             return {
+                "wave": 50,
+                "name": "CandlePatternFilter",
                 "last_pattern":  self._last_pattern,
                 "last_bias":     self._last_bias,
                 "last_update":   round(self._last_update, 2),
+                "total_blocks":  self._total_blocks,
+                "ticks_buffered": len(self._ticks),
             }
 
 
