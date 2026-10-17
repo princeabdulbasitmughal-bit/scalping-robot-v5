@@ -25,11 +25,11 @@ class SessionLotBooster:
         min_win_rate: float = 55.0,
     ):
         self._lock = threading.RLock()
-        self._start_h = overlap_start_utc
-        self._end_h = overlap_end_utc
-        self._boost = boost_multiplier
-        self._min_vol = min_vol_index
-        self._min_wr = min_win_rate
+        self._start_h = int(overlap_start_utc) if (overlap_start_utc is not None and not isinstance(overlap_start_utc, bool)) else 12
+        self._end_h = int(overlap_end_utc) if (overlap_end_utc is not None and not isinstance(overlap_end_utc, bool)) else 15
+        self._boost = float(boost_multiplier) if (boost_multiplier is not None and not isinstance(boost_multiplier, bool) and boost_multiplier > 0) else 1.2
+        self._min_vol = float(min_vol_index) if (min_vol_index is not None and not isinstance(min_vol_index, bool) and min_vol_index > 0) else 1.3
+        self._min_wr = float(min_win_rate) if (min_win_rate is not None and not isinstance(min_win_rate, bool) and min_win_rate >= 0) else 55.0
         self._total_boosts: int = 0
         self._last_boosted: bool = False
         self._created_at: float = time.time()
@@ -60,18 +60,19 @@ class SessionLotBooster:
         """
         if (
             lot is None
+            or isinstance(lot, bool)
             or not isinstance(lot, (int, float))
             or not math.isfinite(lot)
             or lot <= 0
         ):
             return lot
 
-        if not isinstance(vol_index, (int, float)) or not math.isfinite(vol_index):
+        if isinstance(vol_index, bool) or not isinstance(vol_index, (int, float)) or not math.isfinite(vol_index):
             safe_vol = 1.0
         else:
             safe_vol = float(vol_index)
 
-        if not isinstance(win_rate_pct, (int, float)) or not math.isfinite(win_rate_pct):
+        if isinstance(win_rate_pct, bool) or not isinstance(win_rate_pct, (int, float)) or not math.isfinite(win_rate_pct):
             safe_wr = 0.0
         else:
             safe_wr = float(win_rate_pct)

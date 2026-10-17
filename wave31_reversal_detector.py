@@ -29,9 +29,12 @@ class ReversalDetector:
         cooldown_sec: float = 60.0,
     ):
         # Parameter validation & bounds
-        self._rsi_period: int = max(2, int(rsi_period))
-        self._overbought: float = float(overbought)
-        self._oversold: float = float(oversold)
+        period = rsi_period if (rsi_period is not None and not isinstance(rsi_period, bool)) else 14
+        self._rsi_period: int = max(2, int(period))
+        ob = overbought if (overbought is not None and not isinstance(overbought, bool)) else 75.0
+        self._overbought: float = float(ob)
+        os = oversold if (oversold is not None and not isinstance(oversold, bool)) else 25.0
+        self._oversold: float = float(os)
         if not (50.0 < self._overbought < 100.0):
             self._overbought = 75.0
         if not (0.0 < self._oversold < 50.0):
@@ -39,8 +42,10 @@ class ReversalDetector:
         if self._overbought <= self._oversold:
             self._overbought, self._oversold = 75.0, 25.0
 
-        self._price_window: int = max(3, int(price_window))
-        self._cooldown: float = max(0.0, float(cooldown_sec))
+        pw = price_window if (price_window is not None and not isinstance(price_window, bool)) else 5
+        self._price_window: int = max(3, int(pw))
+        cd = cooldown_sec if (cooldown_sec is not None and not isinstance(cooldown_sec, bool)) else 60.0
+        self._cooldown: float = max(0.0, float(cd))
 
         self._prices: deque = deque(maxlen=self._rsi_period + 1)
         self._rsi_history: deque = deque(maxlen=self._price_window)
@@ -214,13 +219,13 @@ class ReversalDetector:
         return len(valid_bars)
 
     # ── Signal Generation ────────────────────────────────────────────────
-    def get_reversal_signal(self) -> Tuple[str, float, str]:
+    def get_reversal_signal(self, now_ts: Optional[float] = None) -> Tuple[str, float, str]:
         """
         Returns (signal: str, confidence: float, reason: str).
         signal is 'BUY', 'SELL', or 'HOLD'.
         """
         with self._lock:
-            now = time.time()
+            now = float(now_ts) if (now_ts is not None and not isinstance(now_ts, bool)) else time.time()
             if now - self._last_signal_time < self._cooldown:
                 return ("HOLD", 0.0, "cooldown_active")
 
@@ -294,9 +299,9 @@ class ReversalDetector:
             self._last_signal_time = 0.0
             self._last_reason = "none"
 
-    def info(self) -> Dict[str, Any]:
+    def info(self, now_ts: Optional[float] = None) -> Dict[str, Any]:
         with self._lock:
-            now = time.time()
+            now = float(now_ts) if (now_ts is not None and not isinstance(now_ts, bool)) else time.time()
             rsi_vals = list(self._rsi_history)
             current_rsi = rsi_vals[-1] if rsi_vals else 50.0
             is_cooldown = (now - self._last_signal_time) < self._cooldown
