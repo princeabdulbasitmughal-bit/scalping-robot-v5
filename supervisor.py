@@ -25,11 +25,28 @@ _MAX_BACKOFF_SEC = 120        # Exponential backoff cap for crash loops
 _MAX_CONSECUTIVE_FAILURES = 20  # Circuit breaker: halt after this many consecutive failures
 
 
-def log(msg):
+def calculate_backoff(consecutive_failures: int) -> int:
+    """Calculate exponential backoff seconds for consecutive failures.
+
+    Exponential progression: 8s, 16s, 32s, 64s, 120s (capped at _MAX_BACKOFF_SEC).
+    Returns 0 if consecutive_failures <= 0.
+    """
+    if consecutive_failures <= 0:
+        return 0
+    return min(8 * (2 ** (consecutive_failures - 1)), _MAX_BACKOFF_SEC)
+
+
+def check_circuit_breaker(consecutive_failures: int) -> bool:
+    """Check if consecutive failures exceeded circuit breaker threshold."""
+    return consecutive_failures >= _MAX_CONSECUTIVE_FAILURES
+
+
+def log(msg, log_file=None):
     ts = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
     line = "[{}] [SUP] {}".format(ts, msg)
+    target = log_file or LOG
     try:
-        with open(LOG, "a", encoding="utf-8") as f:
+        with open(target, "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
         pass
@@ -56,17 +73,21 @@ def get_watchdog_pid():
     return None
 
 
-def start_watchdog():
+def start_watchdog(python_bin=None, watchdog_script=None, base_dir=None, creationflags=None):
     """Launch watchdog_runner.py as a fully detached process."""
+    py_bin = python_bin or PYTHON
+    wd_script = watchdog_script or WATCHDOG
+    cwd_dir = base_dir or BASE
+    flags = creationflags if creationflags is not None else FLAGS
     out_log = None
     err_log = None
     try:
-        out_log = open(os.path.join(BASE, "watchdog_out.log"), "a")
-        err_log = open(os.path.join(BASE, "watchdog_err.log"), "a")
+        out_log = open(os.path.join(cwd_dir, "watchdog_out.log"), "a")
+        err_log = open(os.path.join(cwd_dir, "watchdog_err.log"), "a")
         proc = subprocess.Popen(
-            [PYTHON, WATCHDOG],
-            cwd=BASE,
-            creationflags=FLAGS,
+            [py_bin, wd_script],
+            cwd=cwd_dir,
+            creationflags=flags,
             close_fds=True,
             stdin=subprocess.DEVNULL,
             stdout=out_log,
@@ -105,7 +126,7 @@ if __name__ == "__main__":
                 log("Watchdog DOWN. Restart #{} (consecutive={})".format(restart_count, consecutive_failures))
 
                 # Circuit breaker: if watchdog keeps failing, stop hammering and alert
-                if consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                if check_circuit_breaker(consecutive_failures):
                     log("CRITICAL: Exceeded {} consecutive failures — supervisor entering 1-hour sleep. Check watchdog_runner.py manually!".format(_MAX_CONSECUTIVE_FAILURES))
                     time.sleep(3600)
                     consecutive_failures = 0  # reset after long sleep to allow retry
@@ -113,7 +134,7 @@ if __name__ == "__main__":
 
                 start_watchdog()
                 # Exponential backoff: 8s, 16s, 32s … capped at _MAX_BACKOFF_SEC
-                backoff = min(8 * (2 ** (consecutive_failures - 1)), _MAX_BACKOFF_SEC)
+                backoff = calculate_backoff(consecutive_failures)
                 log("Backoff {}s before next check".format(backoff))
                 time.sleep(backoff)
             else:
