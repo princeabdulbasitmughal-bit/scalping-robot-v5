@@ -314,5 +314,18 @@ def main():
     print(f"[OK] Summary successfully written to {output_summary_path}\n")
 
 
+def is_entry_blocked() -> bool:
+    """Unified risk interface: log analysis does not block trading entries."""
+    return False
+
+
+def is_blocked() -> bool:
+    return False
+
+
+def reset() -> None:
+    pass
+
+
 if __name__ == "__main__":
     main()

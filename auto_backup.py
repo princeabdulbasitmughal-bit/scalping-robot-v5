@@ -362,5 +362,18 @@ def main():
         _release_instance_lock()
 
 
+def is_entry_blocked() -> bool:
+    """Unified risk interface: backup daemon does not block trading entries."""
+    return False
+
+
+def is_blocked() -> bool:
+    return False
+
+
+def reset() -> None:
+    pass
+
+
 if __name__ == "__main__":
     main()
