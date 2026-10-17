@@ -127,9 +127,9 @@ class SessionOptimizer:
     ) -> Tuple[float, float]:
         """Adjust SL/TP based on session volatility profile."""
         info = self.get_current_session_info()
-        if not info.get("tradeable", False):
-            return (0.0, 0.0)
         mult = info.get("pip_multiplier", 1.0)
+        if mult <= 0.0:
+            mult = 1.0
         sl = round(base_sl * mult, 1)
         sl = max(15.0, min(70.0, sl))
         tp = round(sl * rr_ratio, 1)
