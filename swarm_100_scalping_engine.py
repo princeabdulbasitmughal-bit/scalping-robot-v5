@@ -225,6 +225,7 @@ class ScalpingSwarm100:
             self.last_report = report
 
         if save_report:
+            self.report_file.parent.mkdir(parents=True, exist_ok=True)
             tmp_report = self.report_file.with_suffix(".tmp")
             try:
                 with open(tmp_report, "w", encoding="utf-8") as f:
