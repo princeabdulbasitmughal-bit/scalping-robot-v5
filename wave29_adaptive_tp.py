@@ -32,12 +32,12 @@ class AdaptiveTp:
         atr_low_threshold:   Average range per tick considered "low volatility".
         min_tp_pips:         Absolute floor on adjusted TP (only applied if base >= floor).
         """
-        self._window = max(2, int(window)) if isinstance(window, (int, float)) and math.isfinite(window) else 20
-        self._extend_ratio = float(extend_ratio) if isinstance(extend_ratio, (int, float)) and math.isfinite(extend_ratio) and extend_ratio > 0 else 1.5
-        self._shrink_ratio = float(shrink_ratio) if isinstance(shrink_ratio, (int, float)) and math.isfinite(shrink_ratio) and shrink_ratio > 0 else 0.7
-        self._atr_high = float(atr_high_threshold) if isinstance(atr_high_threshold, (int, float)) and math.isfinite(atr_high_threshold) and atr_high_threshold > 0 else 0.15
-        self._atr_low = float(atr_low_threshold) if isinstance(atr_low_threshold, (int, float)) and math.isfinite(atr_low_threshold) and atr_low_threshold > 0 else 0.04
-        self._min_tp_pips = float(min_tp_pips) if isinstance(min_tp_pips, (int, float)) and math.isfinite(min_tp_pips) and min_tp_pips >= 0 else 5.0
+        self._window = max(2, int(window)) if isinstance(window, (int, float)) and not isinstance(window, bool) and math.isfinite(window) else 20
+        self._extend_ratio = float(extend_ratio) if isinstance(extend_ratio, (int, float)) and not isinstance(extend_ratio, bool) and math.isfinite(extend_ratio) and extend_ratio > 0 else 1.5
+        self._shrink_ratio = float(shrink_ratio) if isinstance(shrink_ratio, (int, float)) and not isinstance(shrink_ratio, bool) and math.isfinite(shrink_ratio) and shrink_ratio > 0 else 0.7
+        self._atr_high = float(atr_high_threshold) if isinstance(atr_high_threshold, (int, float)) and not isinstance(atr_high_threshold, bool) and math.isfinite(atr_high_threshold) and atr_high_threshold > 0 else 0.15
+        self._atr_low = float(atr_low_threshold) if isinstance(atr_low_threshold, (int, float)) and not isinstance(atr_low_threshold, bool) and math.isfinite(atr_low_threshold) and atr_low_threshold > 0 else 0.04
+        self._min_tp_pips = float(min_tp_pips) if isinstance(min_tp_pips, (int, float)) and not isinstance(min_tp_pips, bool) and math.isfinite(min_tp_pips) and min_tp_pips >= 0 else 5.0
 
         self._prices: deque = deque(maxlen=self._window + 1)
         self._current_atr: float = 0.0

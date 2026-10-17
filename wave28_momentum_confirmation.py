@@ -42,8 +42,8 @@ class MomentumConfirmation:
         lookback: int = 5,
         min_ticks_in_dir: int = 3,
     ):
-        self._lookback = max(1, int(lookback)) if isinstance(lookback, (int, float)) and math.isfinite(lookback) else 5
-        raw_min = int(min_ticks_in_dir) if isinstance(min_ticks_in_dir, (int, float)) and math.isfinite(min_ticks_in_dir) else 3
+        self._lookback = max(1, int(lookback)) if isinstance(lookback, (int, float)) and not isinstance(lookback, bool) and math.isfinite(lookback) else 5
+        raw_min = int(min_ticks_in_dir) if isinstance(min_ticks_in_dir, (int, float)) and not isinstance(min_ticks_in_dir, bool) and math.isfinite(min_ticks_in_dir) else 3
         # min_ticks_in_dir cannot exceed lookback
         self._min_ticks_in_dir = max(1, min(raw_min, self._lookback))
         self._price_buffer: deque[float] = deque(maxlen=self._lookback + 1)
