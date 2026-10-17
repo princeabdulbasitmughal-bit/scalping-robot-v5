@@ -20,7 +20,7 @@ def atomic_write_json(
     file_path: str | Path,
     data: Any,
     indent: int = 2,
-    max_retries: int = 10,
+    max_retries: int = 15,
     retry_delay: float = 0.02
 ) -> bool:
     """
