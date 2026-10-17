@@ -591,7 +591,7 @@ class ScalpingRobotV5:
     def calculate_position_size(
         self,
         account_balance: float,
-        indicators: Dict[str, Any],
+        indicators: Optional[Dict[str, Any]] = None,
         sl_pips: Optional[float] = None,
         risk_percent: Optional[float] = None
     ) -> float:
@@ -629,14 +629,17 @@ class ScalpingRobotV5:
         max_lots = float(self.config.get("max_lot_size", 5.0))
         lot_step = max(1e-4, float(self.config.get("lot_step", 0.01)))
 
-        if sl_pips is not None and sl_pips > 0 and not math.isnan(sl_pips):
+        if sl_pips is not None:
+            if sl_pips <= 0 or math.isnan(sl_pips):
+                logger.warning("[SIZING] Explicit sl_pips <= 0 or NaN (%.2f) — returning 0.0 lots", sl_pips)
+                return 0.0
             effective_sl_pips = sl_pips
         else:
-            stops = self.calculate_dynamic_stops(indicators)
+            stops = self.calculate_dynamic_stops(indicators or {})
             effective_sl_pips = float(stops.get("sl_pips", float(self.config.get("sl_pips", 30.0))))
+            if math.isnan(effective_sl_pips) or effective_sl_pips <= 0:
+                effective_sl_pips = 30.0
 
-        if math.isnan(effective_sl_pips) or effective_sl_pips <= 0:
-            effective_sl_pips = 30.0
 
         # Dollar risk per lot = Stop Loss in Pips * Pip Value per Lot
         risk_per_lot = max(1e-4, effective_sl_pips * pip_value)
@@ -655,6 +658,9 @@ class ScalpingRobotV5:
 
         final_lots = min(max_lots, quantized_lots)
         return round(final_lots, 2)
+
+    calculate_lot_size = calculate_position_size
+
 
     def reset(self) -> None:
         """Reset internal circuit breaker, counters, and open state."""
