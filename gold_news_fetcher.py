@@ -72,7 +72,12 @@ def fetch_rss(url, timeout=10):
 
 def check_high_impact(headlines):
     """Return True if any headline contains high-impact keywords (whole-word match)."""
-    for title, _ in headlines:
+    if not headlines or not isinstance(headlines, (list, tuple)):
+        return False, ''
+    for item in headlines:
+        if not isinstance(item, (list, tuple)) or len(item) == 0:
+            continue
+        title = str(item[0]) if item[0] is not None else ""
         for pattern in _KW_PATTERNS:
             if pattern.search(title):
                 logger.info("HIGH IMPACT KEYWORD FOUND: '%s' in '%s'", pattern.pattern, title[:80])
@@ -80,21 +85,32 @@ def check_high_impact(headlines):
     return False, ''
 
 
-def write_status(high_impact, headlines, avoid_trading):
+def write_status(high_impact, headlines, avoid_trading, target_file=None):
+    target = target_file or NEWS_STATUS_FILE
+    head_list = []
+    if headlines and isinstance(headlines, (list, tuple)):
+        for h in headlines[:5]:
+            if isinstance(h, (list, tuple)) and len(h) > 0 and h[0] is not None:
+                head_list.append(str(h[0])[:100])
+            elif isinstance(h, str):
+                head_list.append(h[:100])
     status = {
-        'high_impact_alert': high_impact,
-        'last_headlines': [h[0][:100] for h in headlines[:5]] if headlines else [],
+        'high_impact_alert': bool(high_impact),
+        'last_headlines': head_list,
         'last_checked': datetime.now(timezone.utc).isoformat(),
-        'avoid_trading': avoid_trading,
+        'avoid_trading': bool(avoid_trading),
     }
-    tmp = NEWS_STATUS_FILE + f'.{os.getpid()}.tmp'
+    tmp = target + f'.{os.getpid()}.tmp'
     try:
+        dir_name = os.path.dirname(target)
+        if dir_name and not os.path.exists(dir_name):
+            os.makedirs(dir_name, exist_ok=True)
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(status, f, indent=2)
         # Windows retry loop for transient file sharing lock
         for attempt in range(5):
             try:
-                os.replace(tmp, NEWS_STATUS_FILE)
+                os.replace(tmp, target)
                 break
             except PermissionError:
                 if attempt == 4:
@@ -109,20 +125,42 @@ def write_status(high_impact, headlines, avoid_trading):
                 pass
 
 
-def _load_last_status() -> dict:
+def _load_last_status(status_file=None) -> dict:
     """Load previous status from disk (fail-closed fallback)."""
+    target = status_file or NEWS_STATUS_FILE
     try:
-        if os.path.exists(NEWS_STATUS_FILE):
-            with open(NEWS_STATUS_FILE, 'r', encoding='utf-8') as f:
+        if os.path.exists(target):
+            with open(target, 'r', encoding='utf-8') as f:
                 return json.load(f)
     except Exception as e:
         logger.warning("_load_last_status error: %s", e)
     return {}
 
 
-def _load_last_avoid_trading() -> bool:
+def _load_last_avoid_trading(status_file=None) -> bool:
     """Load previous avoid_trading state from disk."""
-    return bool(_load_last_status().get('avoid_trading', False))
+    return bool(_load_last_status(status_file=status_file).get('avoid_trading', False))
+
+
+def is_entry_blocked(status_file: str = None) -> bool:
+    """Return True if avoid_trading or high_impact_alert is active in news_status.json."""
+    target = status_file or NEWS_STATUS_FILE
+    try:
+        if not os.path.exists(target):
+            return False
+        with open(target, 'r', encoding='utf-8') as f:
+            st = json.load(f)
+        return bool(st.get('avoid_trading', False) or st.get('high_impact_alert', False))
+    except Exception as e:
+        logger.warning("gold_news_fetcher is_entry_blocked error: %s", e)
+        return True  # fail-closed on corrupt or unreadable file
+
+
+def is_blocked(status_file: str = None) -> bool:
+    return is_entry_blocked(status_file=status_file)
+
+
+
 
 
 def run():

@@ -104,26 +104,28 @@ class EmailAlerter:
         from_email = cfg.get('from_email', '')
         password = cfg.get('password', '')
         to_email = cfg.get('to_email', '')
+        subj_str = str(subject) if subject is not None else "Alert"
+        body_str = str(body) if body is not None else ""
         if not all([from_email, password, to_email]):
-            email_log.warning("Email not configured - skipping alert: %s", subject)
+            email_log.warning("Email not configured - skipping alert: %s", subj_str)
             return False
         try:
             msg = MIMEMultipart()
             msg['From'] = from_email
             msg['To'] = to_email
-            msg['Subject'] = '[GoldBot] ' + subject
+            msg['Subject'] = '[GoldBot] ' + subj_str
             timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-            full_body = body + '\n\n---\nGold Scalping Robot | ' + timestamp
+            full_body = body_str + '\n\n---\nGold Scalping Robot | ' + timestamp
             msg.attach(MIMEText(full_body, 'plain'))
             smtp_host = cfg.get('smtp_host', 'smtp.gmail.com')
             smtp_port = cfg.get('smtp_port', 587)
             with self._make_smtp(smtp_host, smtp_port, timeout=15) as server:
                 server.login(from_email, password)
                 server.send_message(msg)
-            email_log.info("Alert sent: %s -> %s", subject, to_email)
+            email_log.info("Alert sent: %s -> %s", subj_str, to_email)
             return True
         except Exception as e:
-            email_log.error("send_alert failed: %s - Error: %s", subject, e)
+            email_log.error("send_alert failed: %s - Error: %s", subj_str, e)
             return False
 
     def test_connection(self):
@@ -145,6 +147,13 @@ class EmailAlerter:
             email_log.warning("SMTP connection test FAILED: %s", e)
             return False
 
+    def is_entry_blocked(self) -> bool:
+        """Email alerter is an outbound notifier and never blocks trading entries."""
+        return False
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
+
 
 # Singleton
 _alerter = EmailAlerter()
@@ -152,3 +161,12 @@ _alerter = EmailAlerter()
 
 def get_alerter():
     return _alerter
+
+
+def is_entry_blocked() -> bool:
+    return _alerter.is_entry_blocked()
+
+
+def is_blocked() -> bool:
+    return is_entry_blocked()
+
