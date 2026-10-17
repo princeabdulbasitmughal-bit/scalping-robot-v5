@@ -12,6 +12,7 @@ micro-size while losses continue.
 """
 from __future__ import annotations
 import logging
+import math
 import threading
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,13 @@ class DrawdownAccelerator:
     #  Public API                                                           #
     # ------------------------------------------------------------------ #
 
+    def reset(self) -> None:
+        """Reset streak counters and reductions to initial state."""
+        with self._lock:
+            self._consec_losses = 0
+            self._consec_wins = 0
+            self._total_reductions = 0
+
     def record_trade(self, won: bool) -> None:
         """Update streak counters after each closed trade."""
         with self._lock:
@@ -78,13 +86,13 @@ class DrawdownAccelerator:
 
     def apply_lot(self, lot: float) -> float:
         """Return the adjusted lot size based on current streak."""
-        if lot <= 0.0:
+        if not isinstance(lot, (int, float)) or not math.isfinite(lot) or lot <= 0.0:
             return 0.0
         with self._lock:
             multiplier = self._get_multiplier()
             if multiplier >= 1.0:
-                return lot
-            adjusted = round(max(lot * multiplier, 0.01), 2)
+                return float(lot)
+            adjusted = round(max(float(lot) * multiplier, 0.01), 2)
             return adjusted
 
     def get_multiplier(self) -> float:
@@ -111,7 +119,12 @@ class DrawdownAccelerator:
         multiplier = 1.0
         for min_losses, mult in self._thresholds:
             if self._consec_losses >= min_losses:
-                multiplier = mult
+                try:
+                    clean_mult = float(mult)
+                    if math.isfinite(clean_mult) and clean_mult > 0:
+                        multiplier = clean_mult
+                except Exception:
+                    pass
         return multiplier
 
     def _mode_label(self) -> str:

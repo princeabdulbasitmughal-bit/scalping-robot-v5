@@ -54,7 +54,7 @@ class DailyProfitLock:
         Does NOT auto-disengage during the same trading day
         (daily reset in mt5_live_trader handles midnight UTC reset).
         """
-        if daily_pnl is None or math.isnan(daily_pnl) or math.isinf(daily_pnl):
+        if daily_pnl is None or not isinstance(daily_pnl, (int, float)) or not math.isfinite(daily_pnl):
             return
 
         with self._lock:
@@ -95,24 +95,34 @@ class DailyProfitLock:
 
     def apply_lot(self, current_lot: float) -> float:
         """Return adjusted lot — reduced to protect_lot when locked."""
-        if current_lot is None or math.isnan(current_lot) or math.isinf(current_lot) or current_lot <= 0:
+        if (
+            current_lot is None
+            or not isinstance(current_lot, (int, float))
+            or not math.isfinite(current_lot)
+            or current_lot <= 0
+        ):
             return current_lot
         with self._lock:
             if self._protect_mode:
-                new_lot = min(current_lot, self._protect_lot)
+                new_lot = min(float(current_lot), self._protect_lot)
                 if new_lot < current_lot:
                     logger.debug(
                         f"[PROFIT LOCK] Lot reduced: {current_lot:.2f} → {new_lot:.2f}"
                     )
                 return new_lot
-            return current_lot
+            return float(current_lot)
 
     def get_min_score(self, base_min_score: int = 55) -> int:
         """Return minimum signal score required — higher in protect mode."""
+        if not isinstance(base_min_score, (int, float)) or not math.isfinite(base_min_score):
+            base_score = 55
+        else:
+            base_score = int(base_min_score)
+
         with self._lock:
             if self._protect_mode:
-                return max(base_min_score, self._protect_score)
-            return base_min_score
+                return max(base_score, self._protect_score)
+            return base_score
 
     def info(self) -> dict:
         """Summary dict for live_status.json."""

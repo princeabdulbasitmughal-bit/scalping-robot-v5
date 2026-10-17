@@ -46,10 +46,20 @@ class SpreadOptimizer:
         self._last_session: str = "OFF"
         self._last_limit: float = _DEFAULT_LIMIT
 
+    def reset(self) -> None:
+        """Reset internal telemetry and counters."""
+        with self._lock:
+            self._rejected_count = 0
+            self._accepted_count = 0
+            self._last_spread = 0.0
+            self._last_session = "OFF"
+            self._last_limit = _DEFAULT_LIMIT
+
     # ------------------------------------------------------------------
-    def _detect_session(self) -> str:
+    def _detect_session(self, now_dt: datetime = None) -> str:
         """Simple UTC-hour based session detector (fallback if no session_optimizer)."""
-        utc_hour = datetime.now(timezone.utc).hour
+        dt = now_dt or datetime.now(timezone.utc)
+        utc_hour = dt.hour
         if 22 <= utc_hour or utc_hour < 7:    # 22:00-07:00 UTC
             return "TOKYO"
         elif 7 <= utc_hour < 12:              # 07:00-12:00 UTC
@@ -66,6 +76,7 @@ class SpreadOptimizer:
         spread_pips: float,
         session_name: str = None,
         vol_index: float = 1.0,
+        now_dt: datetime = None,
     ) -> tuple:
         """
         Returns (ok: bool, reason: str).
@@ -74,15 +85,21 @@ class SpreadOptimizer:
             spread_pips  : current broker spread in pips
             session_name : optional session name from wave10 session optimizer
             vol_index    : current session volatility index (from wave10)
+            now_dt       : optional datetime for deterministic session resolution
         """
-        if spread_pips is None or math.isnan(spread_pips) or math.isinf(spread_pips) or spread_pips < 0:
+        if (
+            spread_pips is None
+            or not isinstance(spread_pips, (int, float))
+            or not math.isfinite(spread_pips)
+            or spread_pips < 0
+        ):
             return False, f"SPREAD REJECT: invalid spread value ({spread_pips})"
 
         with self._lock:
             self._last_spread = float(spread_pips)
 
             # Resolve session
-            session = (session_name or self._detect_session()).upper()
+            session = (session_name or self._detect_session(now_dt)).upper()
             # Normalize common variations
             session = session.replace("NEW YORK", "NEW_YORK").replace("LDN/NY", "LDN_NY")
             if "LONDON" in session and "NY" in session:
@@ -98,7 +115,11 @@ class SpreadOptimizer:
             base_limit = _SESSION_SPREAD_LIMITS.get(session, _DEFAULT_LIMIT)
 
             # Adjust for volatility: high vol → allow slightly wider spread
-            safe_vol = vol_index if vol_index is not None and not math.isnan(vol_index) else 1.0
+            if not isinstance(vol_index, (int, float)) or not math.isfinite(vol_index) or vol_index <= 0:
+                safe_vol = 1.0
+            else:
+                safe_vol = float(vol_index)
+
             if safe_vol >= 1.5:
                 limit = base_limit * 1.2
             elif safe_vol <= 0.5:

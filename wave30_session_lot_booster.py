@@ -34,32 +34,57 @@ class SessionLotBooster:
         self._last_boosted: bool = False
         self._created_at: float = time.time()
 
-    def _in_overlap(self) -> bool:
-        utc_hour = datetime.now(timezone.utc).hour
+    def reset(self) -> None:
+        """Reset internal telemetry and booster state."""
+        with self._lock:
+            self._total_boosts = 0
+            self._last_boosted = False
+
+    def _in_overlap(self, now_dt: datetime = None) -> bool:
+        dt = now_dt or datetime.now(timezone.utc)
+        utc_hour = dt.hour
         if self._start_h <= self._end_h:
             return self._start_h <= utc_hour < self._end_h
         return utc_hour >= self._start_h or utc_hour < self._end_h
 
-    def apply_boost(self, lot: float, vol_index: float = 1.0,
-                    win_rate_pct: float = 50.0) -> float:
+    def apply_boost(
+        self,
+        lot: float,
+        vol_index: float = 1.0,
+        win_rate_pct: float = 50.0,
+        now_dt: datetime = None,
+    ) -> float:
         """
         Returns boosted lot if all conditions are met, else unchanged lot.
         Always respects the caller's max_lot_size cap — callers must enforce that.
         """
-        if lot is None or math.isnan(lot) or math.isinf(lot) or lot <= 0:
+        if (
+            lot is None
+            or not isinstance(lot, (int, float))
+            or not math.isfinite(lot)
+            or lot <= 0
+        ):
             return lot
-        safe_vol = vol_index if vol_index is not None and not math.isnan(vol_index) else 1.0
-        safe_wr = win_rate_pct if win_rate_pct is not None and not math.isnan(win_rate_pct) else 0.0
+
+        if not isinstance(vol_index, (int, float)) or not math.isfinite(vol_index):
+            safe_vol = 1.0
+        else:
+            safe_vol = float(vol_index)
+
+        if not isinstance(win_rate_pct, (int, float)) or not math.isfinite(win_rate_pct):
+            safe_wr = 0.0
+        else:
+            safe_wr = float(win_rate_pct)
 
         with self._lock:
-            if self._in_overlap() and safe_vol >= self._min_vol and safe_wr >= self._min_wr:
-                boosted = round(lot * self._boost, 2)
+            if self._in_overlap(now_dt) and safe_vol >= self._min_vol and safe_wr >= self._min_wr:
+                boosted = round(float(lot) * self._boost, 2)
                 if not self._last_boosted:
                     self._total_boosts += 1
                 self._last_boosted = True
-                return max(boosted, lot)  # never reduce
+                return max(boosted, float(lot))  # never reduce
             self._last_boosted = False
-            return lot
+            return float(lot)
 
     def info(self) -> dict:
         utc_hour = datetime.now(timezone.utc).hour
