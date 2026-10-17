@@ -25,3 +25,4 @@ backups/
 tunnel_url.txt
 *.bak
 email_config.json
+scratch/
