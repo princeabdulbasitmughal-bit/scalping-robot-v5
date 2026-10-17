@@ -155,3 +155,13 @@ def safe_read_json(
 
     logger.debug(f"safe_read_json fallback to default for {path} after {max_retries} attempts: {last_err}")
     return default
+
+
+def is_entry_blocked() -> bool:
+    """Storage utilities do not block trading directly."""
+    return False
+
+
+def is_blocked() -> bool:
+    return is_entry_blocked()
+

@@ -525,3 +525,33 @@ class RiskGuard:
         except Exception as exc:
             # Invariant 9: Fail-closed on ANY unexpected exception
             return Decision(False, f"FAIL_CLOSED: Unexpected exception: {type(exc).__name__}: {str(exc)}", 0.0)
+
+    def is_entry_blocked(self, account: dict = None, market: dict = None) -> bool:
+        """Returns True if kill switch is active, daily loss halted, or balance floor halted."""
+        with self._lock:
+            if bool(self.config.get("kill_switch", False)):
+                return True
+            if self.kill_switch_path.exists():
+                return True
+            if self.state.get("daily_loss_halted", False):
+                return True
+            if self.state.get("balance_floor_halted", False):
+                return True
+            if account is not None and isinstance(account, dict):
+                raw_bal = account.get("balance")
+                min_bal = float(self.config.get("min_balance_usd", 9700.0))
+                if _is_valid_num(raw_bal) and float(raw_bal) < min_bal:
+                    return True
+            return False
+
+    def is_blocked(self, account: dict = None, market: dict = None) -> bool:
+        return self.is_entry_blocked(account=account, market=market)
+
+
+def is_entry_blocked() -> bool:
+    return False
+
+
+def is_blocked() -> bool:
+    return is_entry_blocked()
+
