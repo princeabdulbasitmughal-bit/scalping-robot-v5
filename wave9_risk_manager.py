@@ -343,10 +343,27 @@ class RiskManager:
                 "total_trades": len(self._session_pnl_log),
             }
 
+    def is_entry_blocked(self, balance: float = 10000.0, equity: float = 10000.0, **kwargs) -> bool:
+        """Unified risk interface check for trade entry blocking."""
+        res = self.should_trade(
+            balance=balance,
+            equity=equity,
+            daily_pnl=kwargs.get("daily_pnl", 0.0),
+            daily_loss=kwargs.get("daily_loss", 0.0),
+            open_positions=kwargs.get("open_positions", []),
+            new_signal=kwargs.get("new_signal", "BUY"),
+            now_ts=kwargs.get("now_ts"),
+        )
+        return not res["allowed"]
+
+    def is_blocked(self, balance: float = 10000.0, equity: float = 10000.0, **kwargs) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(balance=balance, equity=equity, **kwargs)
+
     def reset(self, starting_balance: Optional[float] = None) -> None:
         """Restore initial clean state."""
         with self._lock:
-            if starting_balance is not None and math.isfinite(starting_balance) and starting_balance > 0:
+            if starting_balance is not None and not isinstance(starting_balance, bool) and math.isfinite(starting_balance) and starting_balance > 0:
                 self.peak_balance = float(starting_balance)
             self._equity_history.clear()
             self._equity_ema = 0.0

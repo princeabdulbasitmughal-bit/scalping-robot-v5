@@ -260,8 +260,8 @@ class SignalScorer:
 
     def is_trading_allowed(self, score: int, threshold: int = 55) -> Tuple[bool, str]:
         """Return (True, '') if score >= threshold, else (False, reason)."""
-        s = int(score) if isinstance(score, (int, float)) and math.isfinite(score) else 0
-        th = int(threshold) if isinstance(threshold, (int, float)) and math.isfinite(threshold) else 55
+        s = int(score) if isinstance(score, (int, float)) and not isinstance(score, bool) and math.isfinite(score) else 0
+        th = int(threshold) if isinstance(threshold, (int, float)) and not isinstance(threshold, bool) and math.isfinite(threshold) else 55
         if s >= th:
             return True, ""
         return False, f"LOW_SIGNAL_SCORE: {s} < {th}"
@@ -270,6 +270,10 @@ class SignalScorer:
         """Return True if signal score is below entry threshold."""
         allowed, _ = self.is_trading_allowed(score, threshold)
         return not allowed
+
+    def is_blocked(self, score: int = 0, threshold: int = 55) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(score, threshold)
 
     def info(self) -> dict:
         with self._lock:
