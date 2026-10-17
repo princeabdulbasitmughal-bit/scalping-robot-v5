@@ -210,6 +210,10 @@ class TrailingStopManager:
         except Exception as exc:
             logger.debug(f"[WAVE34] close_ticket error for {ticket}: {exc}")
 
+    def remove_ticket(self, ticket: Any) -> None:
+        """Alias for close_ticket."""
+        self.close_ticket(ticket)
+
     # ─────────────────────────────────────────────────────────────
     def reset(self) -> None:
         """Reset internal trailing stop state and telemetry."""

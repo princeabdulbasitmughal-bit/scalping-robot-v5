@@ -199,7 +199,8 @@ class SessionPnLTracker:
 
                 if key in self._blocked_sessions:
                     self._blocked_sessions.remove(key)
-                    logger.info(f"[W51-SessionPnL] Session {key} manually unblocked")
+                    self._session_pnl[key] = 0.0
+                    logger.info(f"[W51-SessionPnL] Session {key} manually unblocked and PnL reset to 0.0")
                     return True
                 return False
         except Exception as e:
