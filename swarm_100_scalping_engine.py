@@ -23,7 +23,7 @@ import threading
 import psutil
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 if sys.platform == "win32":
     try:
