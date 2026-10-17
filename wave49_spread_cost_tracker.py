@@ -37,6 +37,16 @@ class SpreadCostTracker:
         self._total_blocks   = 0
         self._lock           = threading.RLock()
 
+    @property
+    def daily_cost_usd(self) -> float:
+        with self._lock:
+            return round(self._daily_cost_usd, 2)
+
+    @property
+    def total_cost_usd(self) -> float:
+        with self._lock:
+            return round(self._total_cost_usd, 2)
+
     def reset(self) -> None:
         """Thread-safe reset of cumulative spread costs and trade counts."""
         with self._lock:

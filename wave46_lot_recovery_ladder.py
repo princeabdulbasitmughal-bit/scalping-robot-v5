@@ -56,6 +56,11 @@ class LotRecoveryLadder:
         self._consecutive_losses: int = 0
         self._current_lot: float = self._base_lot
 
+    @property
+    def current_lot(self) -> float:
+        """Current recovery lot size."""
+        return self.get_lot()
+
     @staticmethod
     def _is_valid_num(val: any) -> bool:
         return not isinstance(val, bool) and isinstance(val, (int, float)) and math.isfinite(val)

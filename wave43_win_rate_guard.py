@@ -116,6 +116,15 @@ class WinRateGuard:
             logger.debug(f"[WAVE43] is_entry_blocked error: {exc}")
             return True
 
+    def seconds_remaining(self, now_ts: Optional[float] = None) -> float:
+        """Return remaining seconds of win-rate pause."""
+        try:
+            now = time.time() if now_ts is None else float(now_ts)
+            with self._lock:
+                return max(0.0, self._pause_until - now)
+        except Exception:
+            return 0.0
+
     def info(self, now_ts: Optional[float] = None) -> dict:
         try:
             now = time.time() if now_ts is None else float(now_ts)
