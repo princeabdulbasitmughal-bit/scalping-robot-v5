@@ -10,6 +10,7 @@ import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone
+from typing import Optional, Callable, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -35,21 +36,26 @@ DEFAULT_CONFIG = {
 
 
 class EmailAlerter:
-    def __init__(self):
+    def __init__(self, config_file: Optional[str] = None, smtp_factory: Optional[Callable] = None):
+        self._config_file = str(config_file) if config_file else EMAIL_CONFIG_FILE
+        self._smtp_factory = smtp_factory
         self._lock = threading.RLock()
         self.config = self._load_config()
 
     def _load_config(self):
         """Load email config, create template if missing."""
         try:
-            if os.path.exists(EMAIL_CONFIG_FILE):
-                with open(EMAIL_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            if os.path.exists(self._config_file):
+                with open(self._config_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             else:
                 # Create template
-                with open(EMAIL_CONFIG_FILE, 'w', encoding='utf-8') as f:
+                dir_path = os.path.dirname(self._config_file)
+                if dir_path and not os.path.exists(dir_path):
+                    os.makedirs(dir_path, exist_ok=True)
+                with open(self._config_file, 'w', encoding='utf-8') as f:
                     json.dump(DEFAULT_CONFIG, f, indent=2)
-                email_log.info("Created email_config.json template - configure to enable alerts")
+                email_log.info(f"Created {self._config_file} template - configure to enable alerts")
                 return DEFAULT_CONFIG.copy()
         except Exception as e:
             logger.error("EmailAlerter: config load error: %s", e)
@@ -60,8 +66,24 @@ class EmailAlerter:
         with self._lock:
             self.config = self._load_config()
 
+    def update_config(self, new_cfg: dict, persist: bool = False):
+        """Update active configuration in a thread-safe manner."""
+        with self._lock:
+            if isinstance(new_cfg, dict):
+                self.config.update(new_cfg)
+                if persist:
+                    try:
+                        tmp = self._config_file + ".tmp"
+                        with open(tmp, "w", encoding="utf-8") as f:
+                            json.dump(self.config, f, indent=2)
+                        os.replace(tmp, self._config_file)
+                    except Exception as e:
+                        logger.error(f"Email config persist error: {e}")
+
     def _make_smtp(self, smtp_host, smtp_port, timeout=15):
         """Create SMTP connection — uses SMTP_SSL for port 465, STARTTLS for others."""
+        if self._smtp_factory is not None:
+            return self._smtp_factory(smtp_host, smtp_port, timeout=timeout)
         if int(smtp_port) == 465:
             server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=timeout)
             server.ehlo()
