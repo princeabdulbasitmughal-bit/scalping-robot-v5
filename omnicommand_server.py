@@ -114,8 +114,12 @@ _MAX_BODY_BYTES = 1 * 1024 * 1024  # 1 MB
 @app.middleware("http")
 async def limit_body_size(request: Request, call_next):
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > _MAX_BODY_BYTES:
-        return JSONResponse({"error": "Request body too large (max 1 MB)"}, status_code=413)
+    if content_length:
+        try:
+            if int(content_length) > _MAX_BODY_BYTES:
+                return JSONResponse({"error": "Request body too large (max 1 MB)"}, status_code=413)
+        except (ValueError, TypeError):
+            return JSONResponse({"error": "Invalid Content-Length header"}, status_code=400)
     return await call_next(request)
 
 
@@ -1225,7 +1229,7 @@ def serve_dashboard_v2():
 @app.get("/download/suite")
 @app.get("/download/master")
 @app.get("/download/all")
-def download_master_suite():
+def download_master_suite(_auth: None = Security(_require_api_key)):
     """Directly download the full Basit AI Master Suite ZIP archive."""
     p = Path("E:/Basit_AI_Master_Project_Suite.zip")
     if p.exists():
@@ -1238,7 +1242,7 @@ def download_master_suite():
 
 
 @app.get("/download/omnitrade")
-def download_omnitrade_zip():
+def download_omnitrade_zip(_auth: None = Security(_require_api_key)):
     p = Path("E:/omnitrade-ai-matrix.zip")
     if p.exists():
         return FileResponse(str(p), media_type="application/zip", filename="omnitrade-ai-matrix.zip")
@@ -1246,7 +1250,7 @@ def download_omnitrade_zip():
 
 
 @app.get("/download/jarvis")
-def download_jarvis_zip():
+def download_jarvis_zip(_auth: None = Security(_require_api_key)):
     p = Path("E:/basit-jarvis-ai.zip")
     if p.exists():
         return FileResponse(str(p), media_type="application/zip", filename="basit-jarvis-ai.zip")
@@ -1254,7 +1258,7 @@ def download_jarvis_zip():
 
 
 @app.get("/download/scalper")
-def download_scalper_zip():
+def download_scalper_zip(_auth: None = Security(_require_api_key)):
     p = Path("E:/scalping-robot-v5.zip")
     if p.exists():
         return FileResponse(str(p), media_type="application/zip", filename="scalping-robot-v5.zip")

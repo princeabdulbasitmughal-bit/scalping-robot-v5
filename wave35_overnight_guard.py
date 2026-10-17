@@ -6,6 +6,7 @@ Also blocks entries during dangerous rollover window (21:45-22:15 UTC daily).
 """
 
 import threading
+from typing import Optional
 from datetime import datetime, timezone
 
 
@@ -37,7 +38,7 @@ class OvernightGuard:
     def _utc_now(self):
         return datetime.now(timezone.utc)
 
-    def is_entry_blocked(self) -> bool:
+    def is_entry_blocked(self, now_dt: Optional[datetime] = None) -> bool:
         """
         Returns True if new entries should be blocked.
         Blocks during:
@@ -45,7 +46,10 @@ class OvernightGuard:
         - Daily rollover 21:45-22:15 UTC
         """
         with self._lock:
-            now = self._utc_now()
+            if now_dt is not None:
+                now = now_dt.astimezone(timezone.utc) if now_dt.tzinfo else now_dt.replace(tzinfo=timezone.utc)
+            else:
+                now = self._utc_now()
             weekday = now.weekday()  # 4=Friday, 5=Saturday, 6=Sunday
             hour = now.hour
             minute = now.minute
@@ -80,13 +84,16 @@ class OvernightGuard:
             self.rollover_block_active = False
             return False
 
-    def should_force_close_all(self) -> bool:
+    def should_force_close_all(self, now_dt: Optional[datetime] = None) -> bool:
         """
         Returns True if ALL open positions should be force-closed.
         Triggers from Friday 20:30 UTC to avoid weekend gaps.
         """
         with self._lock:
-            now = self._utc_now()
+            if now_dt is not None:
+                now = now_dt.astimezone(timezone.utc) if now_dt.tzinfo else now_dt.replace(tzinfo=timezone.utc)
+            else:
+                now = self._utc_now()
             weekday = now.weekday()
             hour = now.hour
             minute = now.minute

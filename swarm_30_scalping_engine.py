@@ -223,9 +223,12 @@ class ScalpingSwarm30:
             details = "Wave 35 overnight & weekend holding risk prevention armed."
 
         elif agent_id == 29:
-            cpu = psutil.cpu_percent(interval=None)
-            ram = psutil.virtual_memory().percent
-            metric = f"Host CPU: {cpu:.1f}% | RAM: {ram:.1f}%"
+            try:
+                cpu = psutil.cpu_percent(interval=None)
+                ram = psutil.virtual_memory().percent
+                metric = f"Host CPU: {cpu:.1f}% | RAM: {ram:.1f}%"
+            except Exception as exc:
+                metric = f"Host Telemetry: fallback ({exc})"
             details = "Process guard verified: 0 zombie processes, zero memory leaks."
 
         elif agent_id == 30:
@@ -265,8 +268,22 @@ class ScalpingSwarm30:
         with ThreadPoolExecutor(max_workers=30) as executor:
             future_to_id = {executor.submit(self._execute_agent, i): i for i in range(1, 31)}
             for future in as_completed(future_to_id):
-                res = future.result()
-                results.append(res)
+                aid = future_to_id[future]
+                try:
+                    res = future.result()
+                    results.append(res)
+                except Exception as exc:
+                    s_id = ((aid - 1) // 5) + 1
+                    results.append({
+                        "id": aid,
+                        "squadron_id": s_id,
+                        "squadron_name": f"Squadron {s_id}",
+                        "agent_name": f"Subagent-{aid:02d}",
+                        "status": "WARN",
+                        "latency_ms": 0.0,
+                        "metric": f"Subagent exception: {exc}",
+                        "details": "Recovered by Swarm Resilience Guard"
+                    })
 
         results.sort(key=lambda x: x["id"])
         total_time_ms = round((time.perf_counter() - t_start) * 1000, 1)
@@ -301,8 +318,14 @@ class ScalpingSwarm30:
             "agents": results
         }
 
-        with open(REPORT_FILE, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
+        tmp_report = REPORT_FILE.with_suffix(".tmp")
+        try:
+            with open(tmp_report, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
+            tmp_report.replace(REPORT_FILE)
+        except Exception:
+            with open(REPORT_FILE, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
 
         print(f"\n✅ 30-Subagent Swarm Completed in {total_time_ms}ms!")
         print(f"📊 Overall Health Score : {overall_health}% ({optimal_total}/30 Optimal)")

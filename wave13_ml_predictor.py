@@ -32,14 +32,14 @@ class LinearRegressor:
             return self._predictor
 
     def fit(self, y: list = None) -> dict:
-        if not y:
+        if not y or not isinstance(y, (list, tuple)):
             return {"slope": 0.0, "intercept": 0.0, "r_squared": 0.0}
         clean_y = []
         for val in y:
             if val is not None:
                 try:
                     f = float(val)
-                    if not math.isnan(f):
+                    if math.isfinite(f):
                         clean_y.append(f)
                 except (ValueError, TypeError):
                     continue
@@ -93,8 +93,8 @@ class MLPredictor:
     """
 
     def __init__(self, window: int = 20, min_r2: float = 0.25, _regressor=None):
-        self.window = window
-        self.min_r2 = min_r2
+        self.window = max(5, int(window)) if isinstance(window, (int, float)) and math.isfinite(window) else 20
+        self.min_r2 = float(min_r2) if isinstance(min_r2, (int, float)) and math.isfinite(min_r2) else 0.25
         self._regressor = _regressor if _regressor is not None else LinearRegressor()
         self._last_prediction: dict = {}
         self._prediction_history: list = []  # (timestamp, direction, confidence)
@@ -117,16 +117,18 @@ class MLPredictor:
               "atr_norm_slope": float
             }
         """
-        if not closes:
+        if not closes or not isinstance(closes, (list, tuple)):
             return {"direction": "NEUTRAL", "confidence": 0, "slope": 0.0, "r_squared": 0.0,
                     "momentum": 0.0, "atr_norm_slope": 0.0}
 
         clean_closes = []
-        for c in closes:
+        # Optimization: only inspect up to the last 2 * window elements to bound memory and CPU
+        source_closes = closes[-max(self.window * 2, 50):] if len(closes) > max(self.window * 2, 50) else closes
+        for c in source_closes:
             if c is not None:
                 try:
                     fc = float(c)
-                    if not math.isnan(fc):
+                    if math.isfinite(fc):
                         clean_closes.append(fc)
                 except (ValueError, TypeError):
                     continue
@@ -142,11 +144,17 @@ class MLPredictor:
         # 1. Linear regression
         reg = self._regressor.fit(data)
         slope = reg["slope"]
+        if not math.isfinite(slope):
+            slope = 0.0
         r2 = reg["r_squared"]
+        if not math.isfinite(r2):
+            r2 = 0.0
 
         # 2. Momentum: percentage move over full window
         if data[0] != 0:
             momentum = (data[-1] - data[0]) / data[0]
+            if not math.isfinite(momentum):
+                momentum = 0.0
         else:
             momentum = 0.0
 
@@ -154,6 +162,8 @@ class MLPredictor:
         deltas = [abs(data[i] - data[i - 1]) for i in range(1, n)]
         atr = sum(deltas) / len(deltas) if deltas else 1.0
         atr_norm_slope = slope / atr if atr > 0 else 0.0
+        if not math.isfinite(atr_norm_slope):
+            atr_norm_slope = 0.0
 
         # 4. RSI-style: count up-bars vs down-bars
         up_bars = sum(1 for i in range(1, n) if data[i] > data[i - 1])

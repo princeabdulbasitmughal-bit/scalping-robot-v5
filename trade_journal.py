@@ -25,6 +25,7 @@ class TradeJournal:
             conn = sqlite3.connect(self.db_path, timeout=10)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA busy_timeout=10000;")
+            conn.execute("PRAGMA synchronous=NORMAL;")
             return conn
         except Exception as e:
             if conn:
@@ -74,6 +75,10 @@ class TradeJournal:
                             worst_trade REAL
                         )
                     ''')
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp DESC);")
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_symbol_timestamp ON trades(symbol, timestamp DESC);")
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_exit_reason ON trades(exit_reason);")
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_summary_date ON daily_summary(date DESC);")
                 logger.info("TradeJournal: DB initialized at %s", self.db_path)
             except Exception as e:
                 logger.error("TradeJournal: Init error: %s", e)

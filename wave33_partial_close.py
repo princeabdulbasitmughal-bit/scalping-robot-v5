@@ -6,6 +6,7 @@ Tracks which tickets have been partially closed to avoid double-firing.
 
 import logging
 import time
+import math
 from threading import Lock
 from typing import Any
 
@@ -60,6 +61,11 @@ class PartialCloseManager:
           - position not yet at trigger threshold
         """
         try:
+            if not isinstance(entry_price, (int, float)) or not isinstance(current_price, (int, float)) or not isinstance(tp_price, (int, float)) or not isinstance(lot, (int, float)):
+                return False
+            if not math.isfinite(entry_price) or not math.isfinite(current_price) or not math.isfinite(tp_price) or not math.isfinite(lot):
+                return False
+
             with self._lock:
                 if ticket in self._closed_tickets:
                     return False
@@ -92,10 +98,20 @@ class PartialCloseManager:
         return False
 
     # ─────────────────────────────────────────────────────────────
-    def get_partial_lot(self, lot: float) -> float:
-        """Return lot size to close (half of position)."""
-        partial = round(lot * self.close_ratio, 2)
-        return max(0.01, partial)
+    def get_partial_lot(self, lot: float, min_lot: float = 0.01, lot_step: float = 0.01) -> float:
+        """Return lot size to close (half of position) quantized to lot_step."""
+        if not isinstance(lot, (int, float)) or not math.isfinite(lot) or lot <= 0:
+            return 0.0
+        min_l = max(0.001, float(min_lot)) if isinstance(min_lot, (int, float)) and math.isfinite(min_lot) else 0.01
+        step = max(0.001, float(lot_step)) if isinstance(lot_step, (int, float)) and math.isfinite(lot_step) else 0.01
+
+        raw_partial = float(lot) * self.close_ratio
+        steps = math.floor((raw_partial / step) + 1e-9)
+        partial = round(steps * step, 4)
+        if partial < min_l:
+            partial = min_l
+        partial = min(float(lot), partial)
+        return round(partial, 2 if step >= 0.01 else 4)
 
     # ─────────────────────────────────────────────────────────────
     def reset_ticket(self, ticket: int) -> None:

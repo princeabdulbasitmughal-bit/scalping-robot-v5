@@ -9,6 +9,7 @@ Recovery condition: balance recovers > halt_balance * recovery_factor  OR  N_goo
 
 import logging
 import time
+import math
 import threading
 from collections import deque
 
@@ -42,13 +43,15 @@ class EquityCurveHalt:
         self._consecutive_wins: int = 0
         self._halt_count: int = 0
         self._halt_reason: str = ""
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     def record_trade(self, pnl: float, won: bool) -> None:
         """Call after every closed trade."""
+        if not isinstance(pnl, (int, float)) or not math.isfinite(pnl):
+            return
         with self._lock:
-            self._pnl_history.append(pnl)
+            self._pnl_history.append(float(pnl))
             if won:
                 self._consecutive_wins += 1
             else:
@@ -60,13 +63,15 @@ class EquityCurveHalt:
         Returns (allowed: bool, reason: str).
         Call before each signal evaluation.
         """
+        if not isinstance(current_balance, (int, float)) or not math.isfinite(current_balance):
+            return False, "EQUITY CURVE HALT: Invalid non-finite balance"
         with self._lock:
-            return self._is_trading_allowed_locked(current_balance)
+            return self._is_trading_allowed_locked(float(current_balance))
 
     def _is_trading_allowed_locked(self, current_balance: float) -> tuple:
         # --- Check recovery if already halted ---
         if self._halted:
-            elapsed = time.time() - self._halt_time
+            elapsed = time.monotonic() - self._halt_time
             wins_ok = self._consecutive_wins >= self._recovery_win_streak
             time_ok = elapsed >= self._cooldown_sec
 
@@ -96,7 +101,7 @@ class EquityCurveHalt:
 
         if window_sum < self._loss_threshold and slope < self._slope_threshold:
             self._halted = True
-            self._halt_time = time.time()
+            self._halt_time = time.monotonic()
             self._halt_balance = current_balance
             self._halt_count += 1
             self._consecutive_wins = 0
