@@ -28,13 +28,13 @@ logger = logging.getLogger("wave14_tuner")
 def _mean(values):
     if not values:
         return 0.0
-    clean = [float(v) for v in values if isinstance(v, (int, float)) and math.isfinite(v)]
+    clean = [float(v) for v in values if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)]
     return sum(clean) / len(clean) if clean else 0.0
 
 def _std(values):
     if not values:
         return 0.0
-    clean = [float(v) for v in values if isinstance(v, (int, float)) and math.isfinite(v)]
+    clean = [float(v) for v in values if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)]
     if len(clean) < 2:
         return 0.0
     m = _mean(clean)
@@ -45,7 +45,7 @@ def _percentile(values, pct):
     """Approximate percentile without numpy."""
     if not values:
         return 0.0
-    clean = [float(v) for v in values if isinstance(v, (int, float)) and math.isfinite(v)]
+    clean = [float(v) for v in values if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)]
     if not clean:
         return 0.0
     sorted_v = sorted(clean)
@@ -91,13 +91,14 @@ class AutoTuner:
     # Minimum trades required before making any changes
     MIN_TRADES = 10
 
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str = None, min_trades: int = 10):
         if config_path is None:
             config_path = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)),
                 "config.json"
             )
         self.config_path = config_path
+        self.MIN_TRADES = int(min_trades) if isinstance(min_trades, (int, float)) and not isinstance(min_trades, bool) and min_trades > 0 else 10
         self._last_report: dict = {}
         self._last_run: float = 0.0
         self._lock = threading.RLock()
@@ -135,22 +136,32 @@ class AutoTuner:
             pnl, exit_reason, direction, entry_price, exit_price, lot_size, duration_sec)
         Returns a report dict with suggestions.
         """
-        if current_config is not None:
-            cfg = current_config
-        else:
-            cfg = self._load_config()
-        if len(trade_history) < self.MIN_TRADES:
-            return {
-                "status": "insufficient_data",
-                "trades_analysed": len(trade_history),
-                "min_required": self.MIN_TRADES,
-                "suggestions": [],
-            }
+        with self._lock:
+            if current_config is not None:
+                cfg = current_config
+            else:
+                cfg = self._load_config()
+            if not isinstance(trade_history, (list, tuple)) or len(trade_history) < self.MIN_TRADES:
+                return {
+                    "status": "insufficient_data",
+                    "trades_analysed": len(trade_history) if isinstance(trade_history, (list, tuple)) else 0,
+                    "min_required": self.MIN_TRADES,
+                    "suggestions": [],
+                }
 
-        trades = trade_history[-50:]  # last 50 max
-        n = len(trades)
+            trades = trade_history[-50:]  # last 50 max
+            n = len(trades)
 
-        pnls = [float(t.get("pnl", 0)) for t in trades]
+            pnls = []
+            for t in trades:
+                if isinstance(t, dict):
+                    raw = t.get("pnl", 0)
+                    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and math.isfinite(raw):
+                        pnls.append(float(raw))
+                    else:
+                        pnls.append(0.0)
+                else:
+                    pnls.append(0.0)
         wins = [p for p in pnls if p > 0]
         losses = [p for p in pnls if p < 0]
         win_rate = len(wins) / n * 100
@@ -277,13 +288,15 @@ class AutoTuner:
 
         report = self.analyse(trade_history)
 
+        bal = float(balance) if isinstance(balance, (int, float)) and not isinstance(balance, bool) and math.isfinite(balance) else 0.0
+
         if report.get("config_changed") and not dry_run:
             # Safety: never write if balance < $500 (sanity check)
-            if balance > 500.0 or balance == 0.0:
+            if bal > 500.0 or bal == 0.0:
                 self._save_config(report["proposed_config"])
                 logger.info(f"[TUNER] Config auto-updated: {len(report['suggestions'])} suggestions applied")
             else:
-                logger.warning(f"[TUNER] Config NOT written — balance ${balance:.2f} < $500 safety floor")
+                logger.warning(f"[TUNER] Config NOT written — balance ${bal:.2f} < $500 safety floor")
                 report["config_changed"] = False
 
         # Log all suggestions

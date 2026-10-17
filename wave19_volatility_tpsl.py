@@ -33,11 +33,11 @@ class VolatilityTPSLAdjuster:
         min_sl_pips: float = 15.0,
         max_sl_pips: float = 60.0,
     ):
-        self.atr_period = atr_period
-        self.min_tp_pips = min_tp_pips
-        self.max_tp_pips = max_tp_pips
-        self.min_sl_pips = min_sl_pips
-        self.max_sl_pips = max_sl_pips
+        self.atr_period = int(atr_period) if isinstance(atr_period, (int, float)) and not isinstance(atr_period, bool) and atr_period > 0 else 14
+        self.min_tp_pips = float(min_tp_pips) if isinstance(min_tp_pips, (int, float)) and not isinstance(min_tp_pips, bool) and min_tp_pips > 0 else 20.0
+        self.max_tp_pips = float(max_tp_pips) if isinstance(max_tp_pips, (int, float)) and not isinstance(max_tp_pips, bool) and max_tp_pips >= self.min_tp_pips else 120.0
+        self.min_sl_pips = float(min_sl_pips) if isinstance(min_sl_pips, (int, float)) and not isinstance(min_sl_pips, bool) and min_sl_pips > 0 else 15.0
+        self.max_sl_pips = float(max_sl_pips) if isinstance(max_sl_pips, (int, float)) and not isinstance(max_sl_pips, bool) and max_sl_pips >= self.min_sl_pips else 60.0
         self._lock = threading.RLock()
 
     def _calc_atr(self, closes: list = None) -> float:
@@ -46,7 +46,7 @@ class VolatilityTPSLAdjuster:
             return 0.5
         clean_closes = []
         for c in closes:
-            if c is not None:
+            if c is not None and not isinstance(c, bool):
                 try:
                     f = float(c)
                     if math.isfinite(f):
@@ -76,61 +76,74 @@ class VolatilityTPSLAdjuster:
         Low-vol:   TP tightens to 0.75x, SL tightens to 0.85x (lock in small wins)
         Normal:    No change
         """
-        if not isinstance(base_tp_pips, (int, float)) or not math.isfinite(base_tp_pips) or base_tp_pips <= 0:
-            base_tp_pips = 45.0
-        if not isinstance(base_sl_pips, (int, float)) or not math.isfinite(base_sl_pips) or base_sl_pips <= 0:
-            base_sl_pips = 30.0
+        with self._lock:
+            if (
+                base_tp_pips is None
+                or isinstance(base_tp_pips, bool)
+                or not isinstance(base_tp_pips, (int, float))
+                or not math.isfinite(base_tp_pips)
+                or base_tp_pips <= 0
+            ):
+                base_tp_pips = 45.0
+            if (
+                base_sl_pips is None
+                or isinstance(base_sl_pips, bool)
+                or not isinstance(base_sl_pips, (int, float))
+                or not math.isfinite(base_sl_pips)
+                or base_sl_pips <= 0
+            ):
+                base_sl_pips = 30.0
 
-        if closes is None:
-            closes = []
-        try:
-            atr = self._calc_atr(closes)
+            if closes is None:
+                closes = []
+            try:
+                atr = self._calc_atr(closes)
 
-            # ATR baseline for XAUUSD: ~0.3-1.5 pips per tick
-            atr_ratio = atr / 0.6  # normalise around 0.6 pip average
+                # ATR baseline for XAUUSD: ~0.3-1.5 pips per tick
+                atr_ratio = atr / 0.6  # normalise around 0.6 pip average
 
-            # Session vol_index (1.0 = normal, 1.5+ = high, 0.5- = low)
-            vol_idx = 1.0
-            if session_info and isinstance(session_info, dict):
-                raw_v = session_info.get("vol_index", 1.0)
-                if isinstance(raw_v, (int, float)) and math.isfinite(raw_v):
-                    vol_idx = float(raw_v)
+                # Session vol_index (1.0 = normal, 1.5+ = high, 0.5- = low)
+                vol_idx = 1.0
+                if session_info and isinstance(session_info, dict):
+                    raw_v = session_info.get("vol_index", 1.0)
+                    if isinstance(raw_v, (int, float)) and not isinstance(raw_v, bool) and math.isfinite(raw_v):
+                        vol_idx = float(raw_v)
 
-            # Combined volatility score
-            vol_score = (atr_ratio + vol_idx) / 2.0
+                # Combined volatility score
+                vol_score = (atr_ratio + vol_idx) / 2.0
 
-            if vol_score >= 1.4:
-                # High volatility — widen TP to catch bigger moves, keep SL
-                tp_mult = min(1.5, 0.8 + vol_score * 0.5)
-                sl_mult = 1.0
-                regime = "HIGH-VOL"
-            elif vol_score <= 0.65:
-                # Low volatility — tighten both to lock profits
-                tp_mult = 0.75
-                sl_mult = 0.85
-                regime = "LOW-VOL"
-            else:
-                # Normal — no change
-                tp_mult = 1.0
-                sl_mult = 1.0
-                regime = "NORMAL"
+                if vol_score >= 1.4:
+                    # High volatility — widen TP to catch bigger moves, keep SL
+                    tp_mult = min(1.5, 0.8 + vol_score * 0.5)
+                    sl_mult = 1.0
+                    regime = "HIGH-VOL"
+                elif vol_score <= 0.65:
+                    # Low volatility — tighten both to lock profits
+                    tp_mult = 0.75
+                    sl_mult = 0.85
+                    regime = "LOW-VOL"
+                else:
+                    # Normal — no change
+                    tp_mult = 1.0
+                    sl_mult = 1.0
+                    regime = "NORMAL"
 
-            tp_adj = round(
-                max(self.min_tp_pips, min(base_tp_pips * tp_mult, self.max_tp_pips)), 1
-            )
-            sl_adj = round(
-                max(self.min_sl_pips, min(base_sl_pips * sl_mult, self.max_sl_pips)), 1
-            )
+                tp_adj = round(
+                    max(self.min_tp_pips, min(base_tp_pips * tp_mult, self.max_tp_pips)), 1
+                )
+                sl_adj = round(
+                    max(self.min_sl_pips, min(base_sl_pips * sl_mult, self.max_sl_pips)), 1
+                )
 
-            logger.debug(
-                f"[VOL TPSL] regime={regime} atr={atr:.4f} vol_idx={vol_idx:.2f} "
-                f"score={vol_score:.2f} TP:{base_tp_pips}->{tp_adj} SL:{base_sl_pips}->{sl_adj}"
-            )
-            return tp_adj, sl_adj
+                logger.debug(
+                    f"[VOL TPSL] regime={regime} atr={atr:.4f} vol_idx={vol_idx:.2f} "
+                    f"score={vol_score:.2f} TP:{base_tp_pips}->{tp_adj} SL:{base_sl_pips}->{sl_adj}"
+                )
+                return tp_adj, sl_adj
 
-        except Exception as e:
-            logger.warning(f"[VOL TPSL] Error: {e} — using base values")
-            return base_tp_pips, base_sl_pips
+            except Exception as e:
+                logger.warning(f"[VOL TPSL] Error: {e} — using base values")
+                return base_tp_pips, base_sl_pips
 
     def info(self) -> dict:
         """Telemetry diagnostics."""
