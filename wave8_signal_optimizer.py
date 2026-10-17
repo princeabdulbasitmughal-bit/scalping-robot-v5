@@ -5,6 +5,7 @@ Adds: ATR-adaptive SL/TP, Stochastic RSI, candlestick pattern detection,
 """
 import math
 import collections
+import threading
 from typing import List, Dict, Any, Tuple, Optional
 
 
@@ -15,11 +16,12 @@ class SignalScorer:
         self._atr_history: collections.deque = collections.deque(maxlen=14)
         self._stoch_k_history: collections.deque = collections.deque(maxlen=14)
         self._vol_proxy: collections.deque = collections.deque(maxlen=20)
+        self._lock = threading.Lock()
 
     # ── ATR (Average True Range) ──────────────────────────────────────────────
     def compute_atr(self, bars: List[Dict]) -> float:
         """14-period ATR from OHLC bars dict list."""
-        if len(bars) < 2:
+        if not bars or not isinstance(bars, (list, tuple)) or len(bars) < 2:
             return 1.0
         trs = []
         for i in range(1, min(15, len(bars))):
@@ -31,18 +33,30 @@ class SignalScorer:
                 h = c + 0.5
                 l = c - 0.5
             tr = max(h - l, abs(h - pc), abs(l - pc))
-            trs.append(tr)
+            if math.isfinite(tr):
+                trs.append(tr)
         return round(sum(trs) / len(trs), 3) if trs else 1.0
 
     # ── Stochastic RSI ────────────────────────────────────────────────────────
     def compute_stoch_rsi(self, closes: List[float], period: int = 14) -> float:
         """Stochastic RSI: 0-100 (0=oversold, 100=overbought)."""
-        if len(closes) < period + 1:
+        if not closes or not isinstance(closes, (list, tuple)):
+            return 50.0
+        clean_closes = []
+        for c in closes:
+            if c is not None:
+                try:
+                    f = float(c)
+                    if math.isfinite(f):
+                        clean_closes.append(f)
+                except (ValueError, TypeError):
+                    continue
+        if len(clean_closes) < period + 1:
             return 50.0
         # Compute RSI series
         gains, losses = [], []
-        for i in range(1, len(closes)):
-            d = closes[i] - closes[i-1]
+        for i in range(1, len(clean_closes)):
+            d = clean_closes[i] - clean_closes[i-1]
             gains.append(max(d, 0))
             losses.append(max(-d, 0))
         if len(gains) < period:
@@ -51,10 +65,11 @@ class SignalScorer:
         avg_loss = sum(losses[-period:]) / period
         rs = avg_gain / avg_loss if avg_loss > 0 else 100.0
         rsi = 100 - 100 / (1 + rs)
-        self._stoch_k_history.append(rsi)
-        if len(self._stoch_k_history) < 3:
-            return rsi
-        stoch_list = list(self._stoch_k_history)
+        with self._lock:
+            self._stoch_k_history.append(rsi)
+            if len(self._stoch_k_history) < 3:
+                return rsi
+            stoch_list = list(self._stoch_k_history)
         min_rsi = min(stoch_list)
         max_rsi = max(stoch_list)
         if max_rsi == min_rsi:
