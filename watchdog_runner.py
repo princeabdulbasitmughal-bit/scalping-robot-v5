@@ -109,7 +109,7 @@ def status_age(status_file: Path = STATUS_FILE) -> float:
     try:
         if not status_file.exists():
             return 9999.0
-        return time.time() - status_file.stat().st_mtime
+        return max(0.0, time.time() - status_file.stat().st_mtime)
     except Exception:
         return 9999.0
 
