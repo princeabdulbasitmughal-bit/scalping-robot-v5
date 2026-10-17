@@ -154,6 +154,11 @@ class RSIOverboughtOversold:
             val = self._rsi if math.isfinite(self._rsi) else 50.0
             return round(val, 2)
 
+    @property
+    def rsi(self) -> float:
+        """Current RSI value."""
+        return self.get_rsi()
+
     def is_signal_blocked(self, signal: str) -> bool:
         """
         Return True if signal should be blocked due to extreme RSI.

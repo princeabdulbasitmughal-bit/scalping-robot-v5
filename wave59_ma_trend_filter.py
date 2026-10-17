@@ -81,6 +81,12 @@ class MATrendFilter:
         self._total_blocks: int = 0
         self._lock = threading.RLock()
 
+    @property
+    def is_warmed_up(self) -> bool:
+        """True if EMA has been seeded with period ticks."""
+        with self._lock:
+            return self._warmed_up
+
     def reset(self) -> None:
         """Thread-safe reset of internal filter state."""
         with self._lock:
