@@ -14,7 +14,7 @@ import math
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 
 from .scalping_engine import ScalpingRobotV5, ScalpingSignal
 from .storage import atomic_write_json
@@ -24,8 +24,9 @@ logger = logging.getLogger("ScalpingRobotV5.LiveRunner")
 STATUS_FILE = Path(__file__).resolve().parent.parent / "live_status.json"
 
 class ScalpingLiveRunner:
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, status_file: Optional[Union[Path, str]] = None):
         self._lock = threading.RLock()
+        self.status_file = Path(status_file) if status_file is not None else STATUS_FILE
         self.robot = ScalpingRobotV5(config)
         self.running = False
         self.bars = []
@@ -183,7 +184,7 @@ class ScalpingLiveRunner:
                     "updated_at": datetime.now(timezone.utc).isoformat()
                 }
                 
-                atomic_write_json(STATUS_FILE, status)
+                atomic_write_json(self.status_file, status)
                 return status
 
             except Exception as exc:

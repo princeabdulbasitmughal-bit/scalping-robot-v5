@@ -46,7 +46,7 @@ def find_mt4_directories():
                     found.append(parent)
     return found
 
-def install_to_target(target_dir):
+def install_to_target(target_dir, experts_src=None, presets_src=None):
     mql4_experts = os.path.join(target_dir, "MQL4", "Experts")
     mql4_presets = os.path.join(target_dir, "MQL4", "Presets")
     try:
@@ -57,20 +57,22 @@ def install_to_target(target_dir):
         print("  Try running this script as Administrator or verify drive path.")
         return []
 
-
     installed_files = []
     errors = []
 
-    if os.path.exists(EXPERTS_SRC):
+    exp_src = Path(experts_src) if experts_src is not None else EXPERTS_SRC
+    pre_src = Path(presets_src) if presets_src is not None else PRESETS_SRC
+
+    if os.path.exists(exp_src):
         try:
-            expert_files = os.listdir(EXPERTS_SRC)
+            expert_files = os.listdir(exp_src)
         except PermissionError as e:
             errors.append(f"  [ERROR] Cannot list EXPERTS_SRC: {e}")
             expert_files = []
         for f in expert_files:
             # Case-insensitive extension check
             if f.lower().endswith(".ex4") or f.lower().endswith(".mq4"):
-                src = os.path.join(EXPERTS_SRC, f)
+                src = os.path.join(exp_src, f)
                 dst = os.path.join(mql4_experts, f)
                 try:
                     shutil.copy2(src, dst)
@@ -80,15 +82,15 @@ def install_to_target(target_dir):
                 except Exception as e:
                     errors.append(f"  [ERROR] Failed to copy {f} -> Experts: {e}")
 
-    if os.path.exists(PRESETS_SRC):
+    if os.path.exists(pre_src):
         try:
-            preset_files = os.listdir(PRESETS_SRC)
+            preset_files = os.listdir(pre_src)
         except PermissionError as e:
             errors.append(f"  [ERROR] Cannot list PRESETS_SRC: {e}")
             preset_files = []
         for f in preset_files:
             if f.lower().endswith(".set"):
-                src = os.path.join(PRESETS_SRC, f)
+                src = os.path.join(pre_src, f)
                 dst = os.path.join(mql4_presets, f)
                 try:
                     shutil.copy2(src, dst)

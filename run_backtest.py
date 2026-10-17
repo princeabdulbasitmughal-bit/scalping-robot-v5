@@ -67,7 +67,7 @@ def bb_signal(prices, i, period=20):
 
 
 
-def run_backtest(n_ticks=2000, sl_pips=30.0, tp_pips=45.0, lot=0.02, start_balance=10000.0, save_results=True, quiet=False):
+def run_backtest(n_ticks=2000, sl_pips=30.0, tp_pips=45.0, lot=0.02, start_balance=10000.0, save_results=True, quiet=False, results_file=None):
     try:
         ticks = max(25, int(n_ticks))
     except (ValueError, TypeError):
@@ -197,12 +197,13 @@ def run_backtest(n_ticks=2000, sl_pips=30.0, tp_pips=45.0, lot=0.02, start_balan
 
     if save_results:
         try:
-            tmp_file = f"{RESULTS_FILE}.tmp.{os.getpid()}"
+            target_results_file = results_file or RESULTS_FILE
+            tmp_file = f"{target_results_file}.tmp.{os.getpid()}"
             with open(tmp_file, 'w', encoding='utf-8') as f:
                 json.dump(results, f, indent=2)
-            os.replace(tmp_file, RESULTS_FILE)
+            os.replace(tmp_file, target_results_file)
             if not quiet:
-                print("Results saved to backtest_results.json")
+                print("Results saved to {}".format(target_results_file))
         except Exception as e:
             if not quiet:
                 print("Could not save results: {}".format(e))
