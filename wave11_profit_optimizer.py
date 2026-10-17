@@ -23,7 +23,8 @@ class ProfitOptimizer:
         self._peak_floating_pnl: Dict[str, float] = {}  # ticket → peak float PnL
         self._partial_closed: Dict[str, bool] = {}
         self._session_results: collections.deque = collections.deque(maxlen=10)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+
 
     # ── Win/Loss streak tracking ──────────────────────────────────────────────
     def record_result(self, won: bool):
@@ -175,6 +176,27 @@ class ProfitOptimizer:
                 "sample_size": len(results)
             }
 
+    def reset(self) -> None:
+        """Thread-safe reset of streaks and tracked tickets."""
+        with self._lock:
+            self._win_streak = 0
+            self._loss_streak = 0
+            self._peak_floating_pnl.clear()
+            self._partial_closed.clear()
+            self._session_results.clear()
+
+    def info(self) -> dict:
+        with self._lock:
+            return {
+                "wave": 11,
+                "name": "ProfitOptimizer",
+                "win_streak": self._win_streak,
+                "loss_streak": self._loss_streak,
+                "recovery_mode": self.is_recovery_mode(),
+                "tracked_positions": len(self._peak_floating_pnl),
+            }
+
 
 # ── Module-level singleton ─────────────────────────────────────────────────
 profit_optimizer = ProfitOptimizer()
+

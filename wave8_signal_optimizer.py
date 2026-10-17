@@ -16,7 +16,8 @@ class SignalScorer:
         self._atr_history: collections.deque = collections.deque(maxlen=14)
         self._stoch_k_history: collections.deque = collections.deque(maxlen=14)
         self._vol_proxy: collections.deque = collections.deque(maxlen=20)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+
 
     # ── ATR (Average True Range) ──────────────────────────────────────────────
     def compute_atr(self, bars: List[Dict]) -> float:
@@ -250,6 +251,37 @@ class SignalScorer:
         tp = round(sl * rr_ratio, 1)
         return sl, tp
 
+    def reset(self) -> None:
+        """Thread-safe reset of internal histories."""
+        with self._lock:
+            self._atr_history.clear()
+            self._stoch_k_history.clear()
+            self._vol_proxy.clear()
+
+    def is_trading_allowed(self, score: int, threshold: int = 55) -> Tuple[bool, str]:
+        """Return (True, '') if score >= threshold, else (False, reason)."""
+        s = int(score) if isinstance(score, (int, float)) and math.isfinite(score) else 0
+        th = int(threshold) if isinstance(threshold, (int, float)) and math.isfinite(threshold) else 55
+        if s >= th:
+            return True, ""
+        return False, f"LOW_SIGNAL_SCORE: {s} < {th}"
+
+    def is_entry_blocked(self, score: int, threshold: int = 55) -> bool:
+        """Return True if signal score is below entry threshold."""
+        allowed, _ = self.is_trading_allowed(score, threshold)
+        return not allowed
+
+    def info(self) -> dict:
+        with self._lock:
+            return {
+                "wave": 8,
+                "name": "SignalOptimizer",
+                "vol_proxy_len": len(self._vol_proxy),
+                "stoch_k_len": len(self._stoch_k_history),
+                "atr_history_len": len(self._atr_history),
+            }
+
 
 # ── Module-level singleton ─────────────────────────────────────────────────
 signal_scorer = SignalScorer()
+
