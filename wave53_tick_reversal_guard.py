@@ -61,6 +61,7 @@ class TickReversalGuard:
             self._block_count = 0
             self._update_count = 0
             self._last_reversal_direction = ""
+            self._last_trigger_update = -1
 
     def update(self, price: Any) -> None:
         """Feed the latest tick price."""
@@ -109,12 +110,18 @@ class TickReversalGuard:
             with self._lock:
                 # Cooldown still active
                 if current_time < self._block_until:
-                    remaining = self._block_until - current_time
-                    logger.debug(
-                        f"[W53-TickReversal] {sig} BLOCKED — reversal cooldown "
-                        f"({remaining:.0f}s remaining)"
-                    )
-                    return True
+                    if (self._last_reversal_direction == "DOWN" and sig == "BUY") or (self._last_reversal_direction == "UP" and sig == "SELL"):
+                        remaining = self._block_until - current_time
+                        logger.debug(
+                            f"[W53-TickReversal] {sig} BLOCKED — reversal cooldown "
+                            f"({remaining:.0f}s remaining)"
+                        )
+                        return True
+                    # Signal aligns with momentum direction, not blocked
+                    return False
+
+                if self._update_count <= getattr(self, "_last_trigger_update", -1):
+                    return False
 
                 direction = self._consecutive_direction()
 
@@ -123,6 +130,7 @@ class TickReversalGuard:
                     self._block_until = current_time + self._block_duration
                     self._block_count += 1
                     self._last_reversal_direction = "DOWN"
+                    self._last_trigger_update = self._update_count
                     logger.warning(
                         f"[W53-TickReversal] BUY BLOCKED — {self._n} consecutive DOWN ticks "
                         f"(reversal block for {self._block_duration:.0f}s)"
@@ -134,6 +142,7 @@ class TickReversalGuard:
                     self._block_until = current_time + self._block_duration
                     self._block_count += 1
                     self._last_reversal_direction = "UP"
+                    self._last_trigger_update = self._update_count
                     logger.warning(
                         f"[W53-TickReversal] SELL BLOCKED — {self._n} consecutive UP ticks "
                         f"(reversal block for {self._block_duration:.0f}s)"

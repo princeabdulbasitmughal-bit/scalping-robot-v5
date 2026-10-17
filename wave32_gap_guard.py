@@ -13,39 +13,83 @@ import math
 import time
 import logging
 import threading
+from typing import Optional, Tuple, Any
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_GAP_THRESHOLD_PIPS = 5.0
+_DEFAULT_BLOCK_DURATION_SEC = 120.0
+_DEFAULT_PIP_SIZE = 0.1
+
 
 class GapGuard:
+    """
+    Detects abnormal tick-to-tick gaps and applies a temporary entry lockout.
+    Thread-safe with RLock and supports deterministic timestamp injection.
+    """
+
     def __init__(
         self,
-        gap_threshold_pips: float = 5.0,
-        block_duration_sec: float = 120.0,
-        pip_size: float = 0.1,
+        gap_threshold_pips: float = _DEFAULT_GAP_THRESHOLD_PIPS,
+        block_duration_sec: float = _DEFAULT_BLOCK_DURATION_SEC,
+        pip_size: float = _DEFAULT_PIP_SIZE,
     ):
-        self._pip_size = max(float(pip_size), 1e-6)  # guard against zero pip_size
-        self._gap_threshold = gap_threshold_pips * self._pip_size  # in price units
-        self._block_duration = block_duration_sec
+        try:
+            ps = float(pip_size)
+            self._pip_size = ps if math.isfinite(ps) and ps > 0 else _DEFAULT_PIP_SIZE
+        except (ValueError, TypeError):
+            self._pip_size = _DEFAULT_PIP_SIZE
+
+        try:
+            gt = float(gap_threshold_pips)
+            self._gap_threshold_pips = gt if math.isfinite(gt) and gt > 0 else _DEFAULT_GAP_THRESHOLD_PIPS
+        except (ValueError, TypeError):
+            self._gap_threshold_pips = _DEFAULT_GAP_THRESHOLD_PIPS
+
+        self._gap_threshold = self._gap_threshold_pips * self._pip_size  # in price units
+
+        try:
+            bd = float(block_duration_sec)
+            self._block_duration = bd if math.isfinite(bd) and bd >= 0 else _DEFAULT_BLOCK_DURATION_SEC
+        except (ValueError, TypeError):
+            self._block_duration = _DEFAULT_BLOCK_DURATION_SEC
+
         self._last_price: float = 0.0
         self._gap_detected_at: float = 0.0
         self._last_gap_pips: float = 0.0
         self._total_gaps: int = 0
         self._total_blocks: int = 0
-        self._created_at: float = time.monotonic()
-        self._lock = threading.Lock()
+        self._created_at: float = time.time()
+        self._lock = threading.RLock()
 
-    def update_price(self, price: float) -> None:
+    def reset(self) -> None:
+        """Thread-safe reset of gap state and counters."""
+        with self._lock:
+            self._last_price = 0.0
+            self._gap_detected_at = 0.0
+            self._last_gap_pips = 0.0
+            self._total_gaps = 0
+            self._total_blocks = 0
+
+    def update_price(self, price: Any, now_ts: Optional[float] = None) -> None:
         """Feed latest tick. Triggers block if gap is detected."""
+        if price is None or isinstance(price, bool):
+            return
         try:
-            price = float(price)
-            if not math.isfinite(price):
+            p = float(price)
+            if not math.isfinite(p) or p <= 0:
                 return
+        except (ValueError, TypeError):
+            return
+
+        current_time = float(now_ts) if now_ts is not None else time.time()
+
+        try:
             with self._lock:
                 if self._last_price > 0:
-                    gap_raw = abs(price - self._last_price)
+                    gap_raw = abs(p - self._last_price)
                     if gap_raw >= self._gap_threshold:
-                        self._gap_detected_at = time.monotonic()
+                        self._gap_detected_at = current_time
                         self._last_gap_pips = round(gap_raw / self._pip_size, 1)
                         self._total_gaps += 1
                         self._total_blocks += 1
@@ -53,60 +97,67 @@ class GapGuard:
                             f"[WAVE32] GAP detected: {self._last_gap_pips:.1f} pips — "
                             f"blocking for {self._block_duration}s"
                         )
-                self._last_price = price
+                self._last_price = p
         except Exception as e:
             logger.debug(f"[WAVE32] update_price error: {e}")
 
-    def update(self, price: float) -> None:
+    def update(self, price: Any, now_ts: Optional[float] = None) -> None:
         """Alias for update_price."""
-        self.update_price(price)
+        self.update_price(price, now_ts=now_ts)
 
-    def is_trading_allowed(self) -> tuple:
+    def is_trading_allowed(self, now_ts: Optional[float] = None) -> Tuple[bool, str]:
         """
         Returns (allowed: bool, reason: str).
         allowed=False means a gap was recently detected; avoid trading.
         """
+        current_time = float(now_ts) if now_ts is not None else time.time()
         with self._lock:
             if self._gap_detected_at == 0:
-                return (True, "no_gap")
-            elapsed = time.monotonic() - self._gap_detected_at
+                return (True, "")
+            elapsed = current_time - self._gap_detected_at
             if elapsed < self._block_duration:
-                remaining = round(self._block_duration - elapsed, 1)
-                return (False, f"gap_block_{remaining}s_remaining_gap={self._last_gap_pips}pips")
-            return (True, "gap_cleared")
+                remaining = max(0.1, round(self._block_duration - elapsed, 1))
+                return (False, f"GAP_GUARD: {self._last_gap_pips:.1f}p gap active ({remaining}s remaining)")
+            return (True, "")
 
-    def info(self) -> dict:
+    def is_entry_blocked(self, now_ts: Optional[float] = None) -> bool:
+        """Returns True if trading is blocked due to recent gap."""
+        allowed, _ = self.is_trading_allowed(now_ts=now_ts)
+        return not allowed
+
+    def is_blocked(self, now_ts: Optional[float] = None) -> bool:
+        """Standard alias for is_entry_blocked."""
+        return self.is_entry_blocked(now_ts=now_ts)
+
+    def info(self, now_ts: Optional[float] = None) -> dict:
+        current_time = float(now_ts) if now_ts is not None else time.time()
         with self._lock:
-            # Inline is_trading_allowed logic — avoids re-acquiring non-reentrant lock (deadlock)
             if self._gap_detected_at == 0:
-                allowed, reason = True, "no_gap"
-                elapsed = 0.0
+                allowed = True
                 remaining = 0.0
             else:
-                elapsed = time.monotonic() - self._gap_detected_at
+                elapsed = current_time - self._gap_detected_at
                 if elapsed < self._block_duration:
-                    remaining = round(self._block_duration - elapsed, 1)
                     allowed = False
-                    reason = f"gap_block_{remaining}s_remaining_gap={self._last_gap_pips}pips"
+                    remaining = round(self._block_duration - elapsed, 1)
                 else:
-                    allowed, reason = True, "gap_cleared"
+                    allowed = True
                     remaining = 0.0
+
             return {
+                "wave": 32,
+                "name": "GapGuard",
                 "trading_allowed": allowed,
-                "reason": reason,
+                "is_blocked": not allowed,
                 "last_gap_pips": self._last_gap_pips,
+                "gap_threshold_pips": self._gap_threshold_pips,
                 "block_duration_sec": self._block_duration,
-                "cooldown_remaining_sec": round(remaining, 1),
+                "cooldown_remaining_sec": max(0.0, remaining),
                 "total_gaps_detected": self._total_gaps,
-                "total_trade_blocks": self._total_blocks,
-                "gap_threshold_pips": self._gap_threshold / self._pip_size,
+                "total_blocks": self._total_blocks,
+                "last_price": self._last_price,
             }
 
 
-
 # Module-level singleton
-gap_guard = GapGuard(
-    gap_threshold_pips=5.0,
-    block_duration_sec=120.0,
-    pip_size=0.1,
-)
+gap_guard = GapGuard()

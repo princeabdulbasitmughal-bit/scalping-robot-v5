@@ -7,8 +7,8 @@ Tracks which tickets have been partially closed to avoid double-firing.
 import logging
 import time
 import math
-from threading import Lock
-from typing import Any
+import threading
+from typing import Any, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,7 @@ class PartialCloseManager:
     The main trader loop calls `check_position()` each tick for each open position.
     If the position has moved >= 50% to TP and hasn't been partially closed yet,
     `check_position()` returns True so the caller can execute the partial close.
+    Thread-safe with RLock and broker lot quantization.
     """
 
     def __init__(
@@ -29,27 +30,89 @@ class PartialCloseManager:
         trigger_pct: float = _PARTIAL_TRIGGER_PCT,
         close_ratio: float = _PARTIAL_CLOSE_RATIO,
     ):
-        self.trigger_pct = trigger_pct
-        self.close_ratio = close_ratio
+        try:
+            tp = float(trigger_pct)
+            self.trigger_pct = max(0.10, min(0.90, tp)) if math.isfinite(tp) else _PARTIAL_TRIGGER_PCT
+        except (ValueError, TypeError):
+            self.trigger_pct = _PARTIAL_TRIGGER_PCT
+
+        try:
+            cr = float(close_ratio)
+            self.close_ratio = max(0.10, min(0.90, cr)) if math.isfinite(cr) else _PARTIAL_CLOSE_RATIO
+        except (ValueError, TypeError):
+            self.close_ratio = _PARTIAL_CLOSE_RATIO
+
         self._closed_tickets: set = set()   # tickets already partially closed
-        self._lock = Lock()
         self._total_partials = 0
         self._total_pips_locked = 0.0
+        self._lock = threading.RLock()
         logger.info(
-            f"[WAVE33] PartialCloseManager init: trigger={trigger_pct*100:.0f}% TP, "
-            f"close_ratio={close_ratio*100:.0f}%"
+            f"[WAVE33] PartialCloseManager init: trigger={self.trigger_pct*100:.0f}% TP, "
+            f"close_ratio={self.close_ratio*100:.0f}%"
         )
+
+    def reset(self) -> None:
+        """Thread-safe reset of tickets and statistics."""
+        with self._lock:
+            self._closed_tickets.clear()
+            self._total_partials = 0
+            self._total_pips_locked = 0.0
+
+    def remove_ticket(self, ticket: Any) -> None:
+        """Clean up closed position ticket from history."""
+        with self._lock:
+            self._closed_tickets.discard(ticket)
+
+    def close_ticket(self, ticket: Any) -> None:
+        """Alias for remove_ticket."""
+        self.remove_ticket(ticket)
+
+    def get_partial_lot(
+        self,
+        lot: Any,
+        min_lot: float = 0.01,
+        lot_step: float = 0.01,
+    ) -> float:
+        """Alias for get_close_lot matching Wave 33 API."""
+        return self.get_close_lot(lot, min_lot=min_lot, lot_step=lot_step)
+
+    def get_close_lot(
+        self,
+        lot: Any,
+        min_lot: float = 0.01,
+        lot_step: float = 0.01,
+    ) -> float:
+        """
+        Quantizes partial close volume to broker step increments.
+        Returns 0.0 if remaining volume cannot be split.
+        """
+        if lot is None or isinstance(lot, bool):
+            return 0.0
+        try:
+            total_lot = float(lot)
+            if not math.isfinite(total_lot) or total_lot < (min_lot * 2):
+                return 0.0
+
+            raw_close = total_lot * self.close_ratio
+            steps = math.floor((raw_close / lot_step) + 1e-9)
+            quantized = round(steps * lot_step, 2)
+            # Ensure at least min_lot remains open and at least min_lot is closed
+            if quantized < min_lot or (total_lot - quantized) < min_lot:
+                return min_lot
+            return quantized
+        except (ValueError, TypeError):
+            return 0.0
 
     # ─────────────────────────────────────────────────────────────
     def check_position(
         self,
         ticket: Any,
         direction: str,          # 'BUY' or 'SELL'
-        entry_price: float,
-        current_price: float,
-        tp_price: float,
-        sl_price: float = 0.0,
-        lot: float = 0.02,
+        entry_price: Any,
+        current_price: Any,
+        tp_price: Any,
+        sl_price: Any = 0.0,
+        lot: Any = 0.02,
     ) -> bool:
         """
         Returns True if a partial close should be executed NOW.
@@ -60,24 +123,40 @@ class PartialCloseManager:
           - lot too small to split (< 0.02)
           - position not yet at trigger threshold
         """
-        try:
-            if not isinstance(entry_price, (int, float)) or not isinstance(current_price, (int, float)) or not isinstance(tp_price, (int, float)) or not isinstance(lot, (int, float)):
-                return False
-            if not math.isfinite(entry_price) or not math.isfinite(current_price) or not math.isfinite(tp_price) or not math.isfinite(lot):
-                return False
+        if entry_price is None or current_price is None or tp_price is None or lot is None:
+            return False
+        if isinstance(entry_price, bool) or isinstance(current_price, bool) or isinstance(tp_price, bool) or isinstance(lot, bool):
+            return False
 
+        try:
+            ep = float(entry_price)
+            cp = float(current_price)
+            tp = float(tp_price)
+            pos_lot = float(lot)
+            if not (math.isfinite(ep) and math.isfinite(cp) and math.isfinite(tp) and math.isfinite(pos_lot)):
+                return False
+            if ep <= 0 or cp <= 0 or tp <= 0:
+                return False
+        except (ValueError, TypeError):
+            return False
+
+        sig = str(direction).strip().upper()
+        if sig not in ("BUY", "SELL"):
+            return False
+
+        try:
             with self._lock:
                 if ticket in self._closed_tickets:
                     return False
-                if lot < 0.02:
+                if pos_lot < 0.02:
                     return False  # Can't split < 0.02 lot cleanly
 
-                if direction == "BUY":
-                    tp_dist = tp_price - entry_price
-                    moved = current_price - entry_price
+                if sig == "BUY":
+                    tp_dist = tp - ep
+                    moved = cp - ep
                 else:
-                    tp_dist = entry_price - tp_price
-                    moved = entry_price - current_price
+                    tp_dist = ep - tp
+                    moved = ep - cp
 
                 if tp_dist <= 0:
                     return False
@@ -89,7 +168,7 @@ class PartialCloseManager:
                     self._total_partials += 1
                     self._total_pips_locked += pips_locked
                     logger.info(
-                        f"[WAVE33] Partial close triggered: ticket={ticket} dir={direction} "
+                        f"[WAVE33] Partial close triggered: ticket={ticket} dir={sig} "
                         f"progress={progress*100:.1f}% pips_locked~{pips_locked:.2f}"
                     )
                     return True
@@ -97,48 +176,18 @@ class PartialCloseManager:
             logger.warning(f"[WAVE33] check_position error: {exc}")
         return False
 
-    # ─────────────────────────────────────────────────────────────
-    def get_partial_lot(self, lot: float, min_lot: float = 0.01, lot_step: float = 0.01) -> float:
-        """Return lot size to close (half of position) quantized to lot_step."""
-        if not isinstance(lot, (int, float)) or not math.isfinite(lot) or lot <= 0:
-            return 0.0
-        min_l = max(0.001, float(min_lot)) if isinstance(min_lot, (int, float)) and math.isfinite(min_lot) else 0.01
-        step = max(0.001, float(lot_step)) if isinstance(lot_step, (int, float)) and math.isfinite(lot_step) else 0.01
-
-        raw_partial = float(lot) * self.close_ratio
-        steps = math.floor((raw_partial / step) + 1e-9)
-        partial = round(steps * step, 4)
-        if partial < min_l:
-            partial = min_l
-        partial = min(float(lot), partial)
-        return round(partial, 2 if step >= 0.01 else 4)
-
-    # ─────────────────────────────────────────────────────────────
-    def reset_ticket(self, ticket: int) -> None:
-        """Remove ticket from closed set (e.g., if partial close failed)."""
-        try:
-            with self._lock:
-                self._closed_tickets.discard(ticket)
-        except Exception as exc:
-            logger.debug(f"[WAVE33] reset_ticket error for {ticket}: {exc}")
-
-    # ─────────────────────────────────────────────────────────────
     def info(self) -> dict:
-        """Return status dict for live_status.json."""
-        try:
-            with self._lock:
-                return {
-                    "trigger_pct": self.trigger_pct,
-                    "close_ratio": self.close_ratio,
-                    "total_partials_executed": self._total_partials,
-                    "total_pips_locked_approx": round(self._total_pips_locked, 2),
-                    "tracked_tickets": len(self._closed_tickets),
-                }
-        except Exception as exc:
-            logger.warning(f"[WAVE33] info() error: {exc}")
-            return {}
+        with self._lock:
+            return {
+                "wave": 33,
+                "name": "PartialCloseManager",
+                "trigger_pct": self.trigger_pct,
+                "close_ratio": self.close_ratio,
+                "total_partials": self._total_partials,
+                "total_pips_locked": round(self._total_pips_locked, 2),
+                "active_closed_tickets_count": len(self._closed_tickets),
+            }
 
 
 # Module-level singleton
 partial_close_manager = PartialCloseManager()
-PartialClose = PartialCloseManager
