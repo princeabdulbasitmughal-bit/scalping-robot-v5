@@ -5,13 +5,14 @@ Zero external dependencies — uses urllib.request (built-in).
 Configure via E:\\scalping-robot-v5\\telegram_config.json
 """
 import json
+import math
 import os
 import time
 import urllib.request
 import urllib.parse
 import threading
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Callable, Dict, Optional
 
 
 _BASE_DIR = __import__("pathlib").Path(__file__).resolve().parent

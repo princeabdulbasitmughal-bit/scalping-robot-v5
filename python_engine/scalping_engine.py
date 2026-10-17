@@ -42,6 +42,7 @@ class EconomicNewsFilter:
     def __init__(self, pre_minutes: int = 15, post_minutes: int = 30):
         self.pre_seconds = max(0, pre_minutes * 60)
         self.post_seconds = max(0, post_minutes * 60)
+        self._lock = threading.RLock()
         self.events: List[Dict[str, Any]] = []
         self._load_default_calendar()
 
@@ -78,16 +79,18 @@ class EconomicNewsFilter:
     ):
         ts = self._parse_timestamp(event_time)
         if ts > 0:
-            self.events.append({
-                "timestamp": ts,
-                "event": event_name,
-                "currency": currency.upper(),
-                "impact": impact.upper()
-            })
-            self.events.sort(key=lambda x: x.get("timestamp", 0.0))
+            with self._lock:
+                self.events.append({
+                    "timestamp": ts,
+                    "event": event_name,
+                    "currency": currency.upper(),
+                    "impact": impact.upper()
+                })
+                self.events.sort(key=lambda x: x.get("timestamp", 0.0))
 
     def clear_events(self):
-        self.events.clear()
+        with self._lock:
+            self.events.clear()
 
     def _load_default_calendar(self):
         """
@@ -166,21 +169,24 @@ class EconomicNewsFilter:
         Returns: (is_blackout, active_event_dict)
         """
         now_ts = time.time() if current_time is None else self._parse_timestamp(current_time)
+        if not math.isfinite(now_ts) or now_ts <= 0:
+            return False, None
         target_curr = currency.upper() if currency else None
 
-        for event in self.events:
-            if target_curr and event.get("currency") != target_curr:
-                continue
-            event_ts = float(event.get("timestamp", 0.0))
-            window_start = event_ts - self.pre_seconds
-            window_end = event_ts + self.post_seconds
+        with self._lock:
+            for event in self.events:
+                if target_curr and event.get("currency") != target_curr:
+                    continue
+                event_ts = float(event.get("timestamp", 0.0))
+                window_start = event_ts - self.pre_seconds
+                window_end = event_ts + self.post_seconds
 
-            if window_start <= now_ts <= window_end:
-                seconds_to_event = event_ts - now_ts
-                event_info = dict(event)
-                event_info["seconds_to_event"] = round(seconds_to_event, 1)
-                event_info["phase"] = "PRE_EVENT" if seconds_to_event > 0 else "POST_EVENT"
-                return True, event_info
+                if window_start <= now_ts <= window_end:
+                    seconds_to_event = event_ts - now_ts
+                    event_info = dict(event)
+                    event_info["seconds_to_event"] = round(seconds_to_event, 1)
+                    event_info["phase"] = "PRE_EVENT" if seconds_to_event > 0 else "POST_EVENT"
+                    return True, event_info
 
         return False, None
 
@@ -251,7 +257,7 @@ class ScalpingRobotV5:
         self.trade_history: List[Dict[str, Any]] = []
         self.equity_peak = 10000.0
         self.current_balance = 10000.0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def calculate_indicators(self, bars: List[Dict[str, float]]) -> Dict[str, Any]:
         """
@@ -264,12 +270,28 @@ class ScalpingRobotV5:
             int(self.config.get("rsi_period", 14)),
             int(self.config.get("atr_period", 14))
         ) + 5
-        if len(bars) < min_required:
+        if not bars or len(bars) < min_required:
             return {}
 
-        closes = [float(b.get("close", 0.0)) for b in bars if isinstance(b, dict)]
-        highs = [float(b.get("high", 0.0)) for b in bars if isinstance(b, dict)]
-        lows = [float(b.get("low", 0.0)) for b in bars if isinstance(b, dict)]
+        valid_bars = []
+        for b in bars:
+            if not isinstance(b, dict):
+                continue
+            try:
+                c = float(b.get("close", 0.0))
+                h = float(b.get("high", 0.0))
+                l = float(b.get("low", 0.0))
+                if math.isfinite(c) and math.isfinite(h) and math.isfinite(l) and c > 0 and h > 0 and l > 0:
+                    valid_bars.append(b)
+            except (ValueError, TypeError):
+                continue
+
+        if len(valid_bars) < min_required:
+            return {}
+
+        closes = [float(b.get("close", 0.0)) for b in valid_bars]
+        highs = [float(b.get("high", 0.0)) for b in valid_bars]
+        lows = [float(b.get("low", 0.0)) for b in valid_bars]
 
         # 1. EMAs
         fast_ema = self._calc_ema(closes, int(self.config.get("fast_ema", 8)))
@@ -332,6 +354,7 @@ class ScalpingRobotV5:
             "current_tr": round(current_tr, 4),
             "volatility_ratio": round(volatility_ratio, 2),
             "volatility_regime": regime,
+            "regime": regime,
             "trend": "BULLISH" if fast_ema > slow_ema else "BEARISH"
         }
 
@@ -632,3 +655,13 @@ class ScalpingRobotV5:
 
         final_lots = min(max_lots, quantized_lots)
         return round(final_lots, 2)
+
+    def reset(self) -> None:
+        """Reset internal circuit breaker, counters, and open state."""
+        with self._lock:
+            self.volatility_halt_counter = 0
+            self.shield_status = {"status": "NORMAL", "reason": "", "halted": False}
+            self.open_positions.clear()
+            self.trade_history.clear()
+            self.equity_peak = float(self.config.get("starting_balance", 10000.0))
+            self.current_balance = float(self.config.get("starting_balance", 10000.0))
