@@ -3,22 +3,53 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Sequence
+import threading
+from typing import Any, Dict, List, Optional, Sequence
 
 
 class SignalEngine:
     """Compute Bollinger Bands, Wilder RSI, MACD, EMA and a confluence signal."""
 
-    def __init__(self, config: dict):
-        self.config = config
-        self.bb_period = max(1, int(config.get("bb_period", 20)))
-        self.bb_std = float(config.get("bb_std", 2.0))
-        self.rsi_period = max(1, int(config.get("rsi_period", 14)))
-        self.macd_fast = max(1, int(config.get("macd_fast", 12)))
-        self.macd_slow = max(self.macd_fast + 1, int(config.get("macd_slow", 26)))
-        self.macd_signal = max(1, int(config.get("macd_signal", 9)))
-        self.ema_fast = max(1, int(config.get("ema_fast", 8)))
-        self.ema_slow = max(1, int(config.get("ema_slow", 21)))
+    def __init__(self, config: Optional[dict] = None):
+        self.config = dict(config) if config else {}
+        self._lock = threading.RLock()
+        self.bb_period = max(1, int(self.config.get("bb_period", 20)))
+        self.bb_std = float(self.config.get("bb_std", 2.0))
+        self.rsi_period = max(1, int(self.config.get("rsi_period", 14)))
+        self.macd_fast = max(1, int(self.config.get("macd_fast", 12)))
+        self.macd_slow = max(self.macd_fast + 1, int(self.config.get("macd_slow", 26)))
+        self.macd_signal = max(1, int(self.config.get("macd_signal", 9)))
+        self.ema_fast = max(1, int(self.config.get("ema_fast", 8)))
+        self.ema_slow = max(1, int(self.config.get("ema_slow", 21)))
+
+    def update_config(self, new_config: dict) -> None:
+        """Thread-safe parameter update."""
+        with self._lock:
+            if not isinstance(new_config, dict):
+                return
+            self.config.update(new_config)
+            self.bb_period = max(1, int(self.config.get("bb_period", self.bb_period)))
+            self.bb_std = float(self.config.get("bb_std", self.bb_std))
+            self.rsi_period = max(1, int(self.config.get("rsi_period", self.rsi_period)))
+            self.macd_fast = max(1, int(self.config.get("macd_fast", self.macd_fast)))
+            self.macd_slow = max(self.macd_fast + 1, int(self.config.get("macd_slow", self.macd_slow)))
+            self.macd_signal = max(1, int(self.config.get("macd_signal", self.macd_signal)))
+            self.ema_fast = max(1, int(self.config.get("ema_fast", self.ema_fast)))
+            self.ema_slow = max(1, int(self.config.get("ema_slow", self.ema_slow)))
+
+    def info(self) -> Dict[str, Any]:
+        """Telemetry configuration status."""
+        with self._lock:
+            return {
+                "bb_period": self.bb_period,
+                "bb_std": self.bb_std,
+                "rsi_period": self.rsi_period,
+                "macd_fast": self.macd_fast,
+                "macd_slow": self.macd_slow,
+                "macd_signal": self.macd_signal,
+                "ema_fast": self.ema_fast,
+                "ema_slow": self.ema_slow,
+            }
 
     @staticmethod
     def _prices(prices: Sequence[float]) -> List[float]:
@@ -180,3 +211,24 @@ class SignalEngine:
             "macd": macd,
             "ema_cross": ema_cross,
         }
+
+    def get_signal_safe(self, prices: Sequence[float]) -> dict:
+        """
+        Exception-safe signal generator. Returns a neutral HOLD structure
+        if prices is empty, invalid, non-finite, or causes calculation failure.
+        """
+        try:
+            if not prices:
+                raise ValueError("prices sequence is empty")
+            return self.get_signal(list(prices))
+        except Exception as e:
+            return {
+                "signal": "HOLD",
+                "confidence": 0.0,
+                "tier": 3,
+                "reasons": [f"fallback due to input error: {e}"],
+                "bb": {"upper": 0.0, "middle": 0.0, "lower": 0.0, "width": 0.0, "squeeze": False},
+                "rsi": 50.0,
+                "macd": {"macd_line": 0.0, "signal_line": 0.0, "histogram": 0.0, "cross": "NONE"},
+                "ema_cross": "NEUTRAL",
+            }
