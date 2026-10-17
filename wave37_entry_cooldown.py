@@ -19,7 +19,7 @@ class EntryCooldown:
     COOLDOWN_LOSS_SEC = 120    # 120s cooldown after a losing trade (revenge prevention)
 
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._cooldown_until = 0.0
         self._last_cooldown_reason = "NONE"
         self.total_cooldowns_triggered = 0
@@ -68,13 +68,24 @@ class EntryCooldown:
             self._cooldown_until = 0.0
             self._last_cooldown_reason = "RESET"
 
-    def info(self) -> dict:
+    def reset(self):
+        """Thread-safe reset clearing cooldown and counters."""
+        with self._lock:
+            self._cooldown_until = 0.0
+            self._last_cooldown_reason = "RESET"
+            self.total_cooldowns_triggered = 0
+            self.total_win_cooldowns = 0
+            self.total_loss_cooldowns = 0
+            self.last_trade_result = "NONE"
+
+    def info(self, now_ts: float = None) -> dict:
+        now = now_ts if now_ts is not None else time.time()
         with self._lock:
             return {
                 "cooldown_win_sec": self.COOLDOWN_WIN_SEC,
                 "cooldown_loss_sec": self.COOLDOWN_LOSS_SEC,
-                "currently_blocked": time.time() < self._cooldown_until,
-                "seconds_remaining": round(max(0.0, self._cooldown_until - time.time()), 1),
+                "currently_blocked": now < self._cooldown_until,
+                "seconds_remaining": round(max(0.0, self._cooldown_until - now), 1),
                 "last_trade_result": self.last_trade_result,
                 "last_cooldown_reason": self._last_cooldown_reason,
                 "total_cooldowns_triggered": self.total_cooldowns_triggered,

@@ -40,7 +40,7 @@ class WinRateGuard:
         self._window = max(window, self._min_trades)
         self._results: deque = deque(maxlen=self._window)   # 1=win, 0=loss
         self._pause_until: float = 0.0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def reset(self) -> None:
         """Reset rolling trade results and clear any active pause."""
@@ -114,11 +114,11 @@ class WinRateGuard:
             return blocked
         except Exception as exc:
             logger.debug(f"[WAVE43] is_entry_blocked error: {exc}")
-            return False
+            return True
 
-    def info(self) -> dict:
+    def info(self, now_ts: Optional[float] = None) -> dict:
         try:
-            now = time.time()
+            now = time.time() if now_ts is None else float(now_ts)
             with self._lock:
                 n = len(self._results)
                 wr = sum(self._results) / n if n > 0 else 1.0

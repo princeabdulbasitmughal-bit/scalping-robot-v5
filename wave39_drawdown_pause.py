@@ -26,7 +26,7 @@ class DrawdownPause:
         self._equity_history: deque = deque(maxlen=4000)
         self._blocked_until: float = 0.0
         self._last_trigger_reason: str = ""
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def reset(self) -> None:
         """Reset equity history, triggers, and unblock."""
@@ -104,8 +104,8 @@ class DrawdownPause:
         with self._lock:
             return max(0.0, self._blocked_until - now)
 
-    def info(self) -> dict:
-        now = time.time()
+    def info(self, now_ts: float = None) -> dict:
+        now = now_ts if now_ts is not None else time.time()
         with self._lock:
             peak = max((eq for _, eq in self._equity_history), default=0.0)
             current = self._equity_history[-1][1] if self._equity_history else 0.0

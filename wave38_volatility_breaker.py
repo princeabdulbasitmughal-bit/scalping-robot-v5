@@ -27,7 +27,7 @@ class VolatilityBreaker:
     MIN_TICKS = 25             # Minimum ticks before checking
 
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._short_prices = deque(maxlen=self.SHORT_WINDOW + 1)
         self._long_prices = deque(maxlen=self.LONG_WINDOW + 1)
         self._block_until = 0.0
@@ -95,9 +95,9 @@ class VolatilityBreaker:
         if ratio >= self.SPIKE_RATIO:
             now = now_ts if now_ts is not None else time.time()
             if now >= self._block_until:
-                self._block_until = now + self.BLOCK_SECONDS
                 self.total_spikes += 1
                 self.total_blocks += 1
+            self._block_until = max(self._block_until, now + self.BLOCK_SECONDS)
 
     def is_entry_blocked(self, now_ts: float = None) -> bool:
         """Returns True if volatility block is active."""
@@ -110,15 +110,16 @@ class VolatilityBreaker:
         with self._lock:
             return max(0.0, self._block_until - now)
 
-    def info(self) -> dict:
+    def info(self, now_ts: float = None) -> dict:
+        now = now_ts if now_ts is not None else time.time()
         with self._lock:
             return {
                 "short_window_ticks": self.SHORT_WINDOW,
                 "long_window_ticks": self.LONG_WINDOW,
                 "spike_ratio_threshold": self.SPIKE_RATIO,
                 "block_seconds": self.BLOCK_SECONDS,
-                "currently_blocked": time.time() < self._block_until,
-                "seconds_remaining": round(max(0.0, self._block_until - time.time()), 1),
+                "currently_blocked": now < self._block_until,
+                "seconds_remaining": round(max(0.0, self._block_until - now), 1),
                 "current_atr": round(self._current_atr, 4),
                 "baseline_atr": round(self._baseline_atr, 4),
                 "last_ratio": round(self._last_ratio, 3),

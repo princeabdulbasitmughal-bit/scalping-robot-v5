@@ -22,7 +22,7 @@ class ProfitTargetShift:
     """
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._last_factor: float = 1.0
         self._mode: str = "NORMAL"
 

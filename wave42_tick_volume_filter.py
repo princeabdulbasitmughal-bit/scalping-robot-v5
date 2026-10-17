@@ -192,9 +192,9 @@ class TickVolumeFilter:
             return self._last_block_reason
 
     # ------------------------------------------------------------------
-    def info(self) -> Dict[str, Any]:
+    def info(self, now_ts: Optional[float] = None) -> Dict[str, Any]:
         """Telemetry dict compatible with OmniCommand guard monitors."""
-        now = time.time()
+        now = time.time() if now_ts is None else float(now_ts)
         with self._lock:
             rate = self.get_tick_rate(self._window_sec, now)
             recent = self._count_ticks_in_window_locked(self._window_sec, now)

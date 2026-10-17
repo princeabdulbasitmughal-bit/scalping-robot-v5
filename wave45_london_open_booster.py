@@ -36,7 +36,7 @@ class LondonOpenBooster:
         discount: Optional[float] = None,
         **kwargs,
     ):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._start: int = int(start_hour_utc) % 24
         self._end: int = int(end_hour_utc) % 24
         eff_discount = discount if discount is not None else score_discount

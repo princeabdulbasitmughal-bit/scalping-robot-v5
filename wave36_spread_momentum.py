@@ -22,7 +22,7 @@ class SpreadMomentumGuard:
     MIN_TICKS = 3              # Minimum ticks before we start checking
 
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._spread_history = deque(maxlen=self.WINDOW + 5)
         self._block_until = 0.0
         self.total_spikes_detected = 0
@@ -89,14 +89,15 @@ class SpreadMomentumGuard:
         with self._lock:
             return max(0.0, self._block_until - now)
 
-    def info(self) -> dict:
+    def info(self, now_ts: float = None) -> dict:
+        now = now_ts if now_ts is not None else time.time()
         with self._lock:
             return {
                 "spike_ratio_threshold": self.SPIKE_RATIO,
                 "window_ticks": self.WINDOW,
                 "block_seconds": self.BLOCK_SECONDS,
-                "currently_blocked": time.time() < self._block_until,
-                "seconds_remaining": round(max(0.0, self._block_until - time.time()), 1),
+                "currently_blocked": now < self._block_until,
+                "seconds_remaining": round(max(0.0, self._block_until - now), 1),
                 "last_spread_pips": round(self.last_spread, 2),
                 "last_spike_ratio": round(self.last_spike_ratio, 2),
                 "total_spikes_detected": self.total_spikes_detected,
