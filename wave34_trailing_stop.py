@@ -108,6 +108,9 @@ class TrailingStopManager:
         """
         try:
             # 1. Input & finite number guards
+            if ticket is None or isinstance(ticket, bool):
+                return None
+
             if not (_is_valid_num(entry_price) and _is_valid_num(current_price) and _is_valid_num(current_sl)):
                 return None
 
