@@ -3277,7 +3277,7 @@ class MT5LiveTrader:
         self.connect_mt5()
 
         step = 0
-        while self._is_running and step < iterations:
+        while self._is_running and (iterations <= 0 or step < iterations):
             step += 1
             try:
                 self.evaluate_and_trade()
@@ -3293,11 +3293,12 @@ class MT5LiveTrader:
                 print("\n[INFO] Loop interrupted by user.")
                 break
 
-            if step % 20 == 0 or step == iterations:
+            if step % 20 == 0 or (iterations > 0 and step == iterations):
                 mode_str = "MT5 LIVE" if self.mt5_connected else "SIMULATION"
                 avg_us = self.latency_metrics.get("avg_tick_loop_us", 0.0)
                 dev_pts = self.latency_metrics.get("dynamic_slippage_points", 10)
-                sys.stdout.write(f"[{datetime.now().strftime('%H:%M:%S')}] Step {step}/{iterations} [{mode_str}] | Gold: ${self.current_price:,.2f} | Eq: ${self.equity:,.2f} | Pos: {len(self.open_positions)} | Sig: {self.last_signal} | Dev: {dev_pts}pts | TickLoop: {avg_us:.1f}µs\n")
+                iter_label = "∞" if iterations <= 0 else str(iterations)
+                sys.stdout.write(f"[{datetime.now().strftime('%H:%M:%S')}] Step {step}/{iter_label} [{mode_str}] | Gold: ${self.current_price:,.2f} | Eq: ${self.equity:,.2f} | Pos: {len(self.open_positions)} | Sig: {self.last_signal} | Dev: {dev_pts}pts | TickLoop: {avg_us:.1f}µs\n")
                 sys.stdout.flush()
 
         self.stop()
@@ -3308,7 +3309,7 @@ def main():
     parser = argparse.ArgumentParser(description="Scalping Robot V5 Pro MT5 Trader")
     parser.add_argument("--symbol", type=str, default="XAUUSD", help="Symbol to trade (default: XAUUSD)")
     parser.add_argument("--lot", type=float, default=0.02, help="Lot size (default: 0.02)")
-    parser.add_argument("--iterations", type=int, default=999999, help="Number of ticks to process (default: infinite)")
+    parser.add_argument("--iterations", type=int, default=0, help="Number of ticks to process (default: 0 for infinite)")
     parser.add_argument("--interval", type=float, default=0.05, help="Tick polling interval in seconds (default: 0.05)")
     parser.add_argument("--mode", choices=("paper", "live"), default="paper", help="Trading mode; paper is the safe default")
     args = parser.parse_args()
