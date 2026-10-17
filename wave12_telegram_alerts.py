@@ -153,10 +153,10 @@ class TelegramAlerter:
             dt = dt.replace(tzinfo=timezone.utc)
 
         try:
-            e_val = float(entry) if math.isfinite(float(entry or 0.0)) else 0.0
-            sl_val = float(sl) if math.isfinite(float(sl or 0.0)) else 0.0
-            tp_val = float(tp) if math.isfinite(float(tp or 0.0)) else 0.0
-            lot_val = float(lot) if math.isfinite(float(lot or 0.0)) else 0.0
+            e_val = float(entry) if not isinstance(entry, bool) and math.isfinite(float(entry or 0.0)) else 0.0
+            sl_val = float(sl) if not isinstance(sl, bool) and math.isfinite(float(sl or 0.0)) else 0.0
+            tp_val = float(tp) if not isinstance(tp, bool) and math.isfinite(float(tp or 0.0)) else 0.0
+            lot_val = float(lot) if not isinstance(lot, bool) and math.isfinite(float(lot or 0.0)) else 0.0
         except (ValueError, TypeError):
             e_val, sl_val, tp_val, lot_val = 0.0, 0.0, 0.0, 0.0
 
@@ -182,8 +182,8 @@ class TelegramAlerter:
         if not self._config.get("alert_on_trade_close", True):
             return
         try:
-            pnl_val = float(pnl) if math.isfinite(float(pnl or 0.0)) else 0.0
-            bal_val = float(balance) if math.isfinite(float(balance or 0.0)) else 0.0
+            pnl_val = float(pnl) if not isinstance(pnl, bool) and math.isfinite(float(pnl or 0.0)) else 0.0
+            bal_val = float(balance) if not isinstance(balance, bool) and math.isfinite(float(balance or 0.0)) else 0.0
         except (ValueError, TypeError):
             pnl_val, bal_val = 0.0, 0.0
 
@@ -213,8 +213,8 @@ class TelegramAlerter:
         if not self._config.get("alert_on_circuit_breaker", True):
             return
         try:
-            bal_val = float(balance) if math.isfinite(float(balance or 0.0)) else 0.0
-            pnl_val = float(daily_pnl) if math.isfinite(float(daily_pnl or 0.0)) else 0.0
+            bal_val = float(balance) if not isinstance(balance, bool) and math.isfinite(float(balance or 0.0)) else 0.0
+            pnl_val = float(daily_pnl) if not isinstance(daily_pnl, bool) and math.isfinite(float(daily_pnl or 0.0)) else 0.0
         except (ValueError, TypeError):
             bal_val, pnl_val = 0.0, 0.0
 
@@ -244,12 +244,12 @@ class TelegramAlerter:
         if not self._config.get("alert_on_daily_summary", True):
             return
         try:
-            bal_val = float(balance) if math.isfinite(float(balance or 0.0)) else 0.0
-            pnl_val = float(daily_pnl) if math.isfinite(float(daily_pnl or 0.0)) else 0.0
-            wr_val = float(win_rate) if math.isfinite(float(win_rate or 0.0)) else 0.0
-            w_int = int(wins or 0)
-            l_int = int(losses or 0)
-            tot_int = int(total_trades or 0)
+            bal_val = float(balance) if not isinstance(balance, bool) and math.isfinite(float(balance or 0.0)) else 0.0
+            pnl_val = float(daily_pnl) if not isinstance(daily_pnl, bool) and math.isfinite(float(daily_pnl or 0.0)) else 0.0
+            wr_val = float(win_rate) if not isinstance(win_rate, bool) and math.isfinite(float(win_rate or 0.0)) else 0.0
+            w_int = int(wins or 0) if not isinstance(wins, bool) else 0
+            l_int = int(losses or 0) if not isinstance(losses, bool) else 0
+            tot_int = int(total_trades or 0) if not isinstance(total_trades, bool) else 0
         except (ValueError, TypeError):
             bal_val, pnl_val, wr_val, w_int, l_int, tot_int = 0.0, 0.0, 0.0, 0, 0, 0
 
@@ -267,6 +267,13 @@ class TelegramAlerter:
             f"Date: {dt.strftime('%Y-%m-%d')} UTC"
         )
         self.send_alert(msg, force=True)
+
+    def is_entry_blocked(self) -> bool:
+        """Unified risk interface: alerting does not block entries."""
+        return False
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
 
     def reset(self):
         """Reset internal rate limiting and telemetry history."""

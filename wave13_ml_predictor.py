@@ -36,7 +36,7 @@ class LinearRegressor:
             return {"slope": 0.0, "intercept": 0.0, "r_squared": 0.0}
         clean_y = []
         for val in y:
-            if val is not None:
+            if val is not None and not isinstance(val, bool):
                 try:
                     f = float(val)
                     if math.isfinite(f):
@@ -82,6 +82,13 @@ class LinearRegressor:
         """Most recent prediction dictionary."""
         return self._get_predictor().last_prediction
 
+    def is_entry_blocked(self) -> bool:
+        """Unified risk interface: ML regression does not block trade execution."""
+        return False
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
+
     def reset(self) -> None:
         """Reset underlying predictor state."""
         return self._get_predictor().reset()
@@ -101,14 +108,21 @@ class MLPredictor:
     """
 
     def __init__(self, window: int = 20, min_r2: float = 0.25, _regressor=None):
-        self.window = max(5, int(window)) if isinstance(window, (int, float)) and math.isfinite(window) else 20
-        self.min_r2 = float(min_r2) if isinstance(min_r2, (int, float)) and math.isfinite(min_r2) else 0.25
+        self.window = int(window) if isinstance(window, (int, float)) and not isinstance(window, bool) and math.isfinite(window) and window >= 5 else 20
+        self.min_r2 = float(min_r2) if isinstance(min_r2, (int, float)) and not isinstance(min_r2, bool) and math.isfinite(min_r2) and min_r2 >= 0 else 0.25
         self._regressor = _regressor if _regressor is not None else LinearRegressor()
         self._last_prediction: dict = {}
         self._prediction_history: list = []  # (timestamp, direction, confidence)
         self._hit_count = 0
         self._total_checked = 0
         self._lock = threading.RLock()
+
+    def is_entry_blocked(self) -> bool:
+        """Unified risk interface: ML prediction does not block trade execution."""
+        return False
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
 
     # ------------------------------------------------------------------
     def predict(self, closes: list = None) -> dict:
@@ -133,7 +147,7 @@ class MLPredictor:
         # Optimization: only inspect up to the last 2 * window elements to bound memory and CPU
         source_closes = closes[-max(self.window * 2, 50):] if len(closes) > max(self.window * 2, 50) else closes
         for c in source_closes:
-            if c is not None:
+            if c is not None and not isinstance(c, bool):
                 try:
                     fc = float(c)
                     if math.isfinite(fc):
