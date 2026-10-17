@@ -40,6 +40,7 @@ class DrawdownPause:
         """Call every tick / position check with the current equity value."""
         if (
             equity is None
+            or isinstance(equity, bool)
             or not isinstance(equity, (int, float))
             or not math.isfinite(equity)
             or equity <= 0

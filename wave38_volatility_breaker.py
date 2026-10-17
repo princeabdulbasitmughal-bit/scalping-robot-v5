@@ -55,6 +55,7 @@ class VolatilityBreaker:
         """Feed current price each tick."""
         if (
             price is None
+            or isinstance(price, bool)
             or not isinstance(price, (int, float))
             or not math.isfinite(price)
             or price <= 0
