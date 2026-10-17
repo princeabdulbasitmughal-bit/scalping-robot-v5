@@ -483,6 +483,20 @@ class AlertSystem:
 
         return triggered_alerts
 
+    def is_entry_blocked(self) -> bool:
+        """Unified risk interface: returns True if latest alert indicates critical danger."""
+        la = self.last_alert.lower()
+        return la != "" and ("critical" in la or "danger" in la)
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
+
+    def reset(self) -> None:
+        """Reset internal alert histories and counters."""
+        self.last_alert_times.clear()
+        self.last_alert = ""
+        self.total_alerts_today = 0
+
     def run(self):
         """Infinite loop executing check_alerts every 60 seconds."""
         logger.info(f"AlertSystem started. Monitoring {self.status_file} every {self.check_interval}s...")

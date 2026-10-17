@@ -251,6 +251,17 @@ class TradeJournal:
             except Exception:
                 pass
 
+    def is_entry_blocked(self) -> bool:
+        """Unified risk interface: trade journaling never blocks trade execution."""
+        return False
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
+
+    def reset(self) -> None:
+        """Lifecycle reset."""
+        pass
+
 
 # Singleton
 _journal = TradeJournal()
