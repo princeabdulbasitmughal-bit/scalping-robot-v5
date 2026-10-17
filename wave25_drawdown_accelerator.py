@@ -41,7 +41,7 @@ class DrawdownAccelerator:
         self._thresholds: list[tuple[int, float]] = sorted(
             thresholds or self._DEFAULTS, key=lambda x: x[0]
         )
-        self._recovery_wins = recovery_wins
+        self._recovery_wins = int(recovery_wins) if isinstance(recovery_wins, (int, float)) and not isinstance(recovery_wins, bool) and recovery_wins > 0 else 2
 
         self._consec_losses: int = 0
         self._consec_wins: int = 0
@@ -61,8 +61,9 @@ class DrawdownAccelerator:
 
     def record_trade(self, won: bool) -> None:
         """Update streak counters after each closed trade."""
+        is_win = bool(won)
         with self._lock:
-            if won:
+            if is_win:
                 self._consec_wins += 1
                 if self._consec_wins >= self._recovery_wins:
                     # Full recovery
@@ -86,7 +87,7 @@ class DrawdownAccelerator:
 
     def apply_lot(self, lot: float) -> float:
         """Return the adjusted lot size based on current streak."""
-        if not isinstance(lot, (int, float)) or not math.isfinite(lot) or lot <= 0.0:
+        if lot is None or isinstance(lot, bool) or not isinstance(lot, (int, float)) or not math.isfinite(lot) or lot <= 0.0:
             return 0.0
         with self._lock:
             multiplier = self._get_multiplier()

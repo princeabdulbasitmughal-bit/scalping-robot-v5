@@ -29,18 +29,18 @@ class DailyProfitLock:
         **kwargs,
     ):
         self._lock = threading.RLock()
-        if daily_target_usd is not None:
+        if daily_target_usd is not None and not isinstance(daily_target_usd, bool):
             resolved_target = daily_target_usd
-        elif profit_target_usd is not None:
+        elif profit_target_usd is not None and not isinstance(profit_target_usd, bool):
             resolved_target = profit_target_usd
-        elif "target_usd" in kwargs and kwargs["target_usd"] is not None:
+        elif "target_usd" in kwargs and kwargs["target_usd"] is not None and not isinstance(kwargs["target_usd"], bool):
             resolved_target = kwargs["target_usd"]
         else:
             resolved_target = _DEFAULT_TARGET_USD
 
-        self._profit_target = float(resolved_target)
-        self._protect_lot   = float(protect_lot)
-        self._protect_score = int(protect_min_score)
+        self._profit_target = float(resolved_target) if isinstance(resolved_target, (int, float)) and not isinstance(resolved_target, bool) and resolved_target > 0 else _DEFAULT_TARGET_USD
+        self._protect_lot   = float(protect_lot) if isinstance(protect_lot, (int, float)) and not isinstance(protect_lot, bool) and protect_lot > 0 else _PROTECT_LOT
+        self._protect_score = int(protect_min_score) if isinstance(protect_min_score, (int, float)) and not isinstance(protect_min_score, bool) and protect_min_score > 0 else _PROTECT_MIN_SCORE
 
         self._protect_mode: bool = False
         self._peak_daily_pnl: float = 0.0
@@ -54,7 +54,7 @@ class DailyProfitLock:
         Does NOT auto-disengage during the same trading day
         (daily reset in mt5_live_trader handles midnight UTC reset).
         """
-        if daily_pnl is None or not isinstance(daily_pnl, (int, float)) or not math.isfinite(daily_pnl):
+        if daily_pnl is None or isinstance(daily_pnl, bool) or not isinstance(daily_pnl, (int, float)) or not math.isfinite(daily_pnl):
             return
 
         with self._lock:
@@ -97,6 +97,7 @@ class DailyProfitLock:
         """Return adjusted lot — reduced to protect_lot when locked."""
         if (
             current_lot is None
+            or isinstance(current_lot, bool)
             or not isinstance(current_lot, (int, float))
             or not math.isfinite(current_lot)
             or current_lot <= 0
@@ -114,7 +115,7 @@ class DailyProfitLock:
 
     def get_min_score(self, base_min_score: int = 55) -> int:
         """Return minimum signal score required — higher in protect mode."""
-        if not isinstance(base_min_score, (int, float)) or not math.isfinite(base_min_score):
+        if isinstance(base_min_score, bool) or not isinstance(base_min_score, (int, float)) or not math.isfinite(base_min_score):
             base_score = 55
         else:
             base_score = int(base_min_score)
