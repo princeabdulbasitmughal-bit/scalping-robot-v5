@@ -15,7 +15,7 @@ import json
 import logging
 import os
 import threading
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -227,6 +227,10 @@ class RiskManager:
         if not self.correlation_ok(open_positions, new_signal):
             return {"allowed": False, "reason": f"CORRELATION_BLOCK ({new_signal} already open)", "lot_scale": 0.0}
 
+        # Daily loss limit hard gate
+        if daily_loss is not None and isinstance(daily_loss, (int, float)) and daily_loss >= self.max_daily_loss_usd:
+            return {"allowed": False, "reason": f"Daily loss limit reached ({daily_loss:.1f}>={self.max_daily_loss_usd:.1f})", "lot_scale": 0.0}
+
         # Soft halt
         if now < self._soft_halt_until:
             rem = max(0, int(self._soft_halt_until - now))
@@ -240,6 +244,36 @@ class RiskManager:
         lot_scale = round(max(0.1, min(1.0, lot_scale)), 2)
 
         return {"allowed": True, "reason": "OK", "lot_scale": lot_scale}
+
+    def can_open_trade(
+        self,
+        balance: float,
+        equity: float,
+        open_positions: List[Dict],
+        new_direction: str,
+        daily_pnl: float = 0.0,
+        daily_loss: float = 0.0,
+        now_ts: Optional[float] = None,
+    ) -> Tuple[bool, str]:
+        """Convenience interface returning (allowed: bool, reason: str)."""
+        loss = abs(float(daily_pnl)) if isinstance(daily_pnl, (int, float)) and daily_pnl < 0 else float(daily_loss)
+        res = self.should_trade(
+            balance=balance,
+            equity=equity,
+            daily_pnl=daily_pnl,
+            daily_loss=loss,
+            open_positions=open_positions,
+            new_signal=new_direction,
+            now_ts=now_ts,
+        )
+        return res["allowed"], res["reason"]
+
+    def scale_lot_by_daily_pnl(self, base_lot: float, daily_pnl: float) -> float:
+        """Scale lot size according to daily loss accumulated."""
+        loss = abs(float(daily_pnl)) if isinstance(daily_pnl, (int, float)) and daily_pnl < 0 else 0.0
+        scale = self.daily_loss_lot_scale(loss)
+        return round(float(base_lot) * scale, 2)
+
 
     # ── Persist risk state ────────────────────────────────────────────────────
     def save_state(self, path: str = None):
