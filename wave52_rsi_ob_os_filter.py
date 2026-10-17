@@ -197,6 +197,14 @@ class RSIOverboughtOversold:
             logger.error(f"[W52-RSI] is_signal_blocked error: {e}")
             return True  # fail-closed
 
+    def is_entry_blocked(self, signal: str) -> bool:
+        """Alias for is_signal_blocked."""
+        return self.is_signal_blocked(signal)
+
+    def is_blocked(self, signal: str) -> bool:
+        """Alias for is_signal_blocked."""
+        return self.is_signal_blocked(signal)
+
     def info(self) -> dict:
         """Return serializable status dict for live_status.json."""
         try:
