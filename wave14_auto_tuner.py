@@ -100,7 +100,7 @@ class AutoTuner:
         self.config_path = config_path
         self._last_report: dict = {}
         self._last_run: float = 0.0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     def _load_config(self) -> dict:
@@ -293,17 +293,31 @@ class AutoTuner:
         else:
             logger.info("[TUNER] No config changes needed — performance within healthy parameters")
 
-        self._last_run = time.time()
+        with self._lock:
+            self._last_run = time.time()
         return report
 
     # ------------------------------------------------------------------
     @property
     def last_report(self) -> dict:
-        return self._last_report
+        with self._lock:
+            return dict(self._last_report)
 
     @property
     def seconds_since_last_run(self) -> float:
-        return time.time() - self._last_run if self._last_run > 0 else float("inf")
+        with self._lock:
+            return time.time() - self._last_run if self._last_run > 0 else float("inf")
+
+    def get_seconds_since_last_run(self, now_ts: float = None) -> float:
+        now = time.time() if now_ts is None else float(now_ts)
+        with self._lock:
+            return now - self._last_run if self._last_run > 0 else float("inf")
+
+    def reset(self) -> None:
+        """Reset internal tuning reports and timers."""
+        with self._lock:
+            self._last_report = {}
+            self._last_run = 0.0
 
 
 # Module-level singleton

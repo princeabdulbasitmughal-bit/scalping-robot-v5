@@ -47,9 +47,9 @@ class SpikeFilter:
         self._spike_timestamps: deque = deque(maxlen=20)
         self._blocked_until: float = 0.0
         self._last_seen_price: float = 0.0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
-    def check(self, current_price: float, prev_price: float, closes: list = None):
+    def check(self, current_price: float, prev_price: float, closes: list = None, now_ts: float = None):
         """
         Returns (allowed: bool, reason: str).
         Call each tick before generating a signal.
@@ -59,7 +59,7 @@ class SpikeFilter:
                 return False, "SPIKE_FILTER_INVALID_PRICE"
 
             with self._lock:
-                now = time.time()
+                now = time.time() if now_ts is None else float(now_ts)
                 tick_change = abs(current_price - prev_price)
 
                 # Feed the rolling window

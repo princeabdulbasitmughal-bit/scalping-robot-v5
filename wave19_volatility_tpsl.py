@@ -13,6 +13,7 @@ Usage:
 
 import math
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class VolatilityTPSLAdjuster:
         self.max_tp_pips = max_tp_pips
         self.min_sl_pips = min_sl_pips
         self.max_sl_pips = max_sl_pips
+        self._lock = threading.RLock()
 
     def _calc_atr(self, closes: list = None) -> float:
         """ATR proxy: mean of abs(close[i] - close[i-1]) over last atr_period bars."""
@@ -129,6 +131,21 @@ class VolatilityTPSLAdjuster:
         except Exception as e:
             logger.warning(f"[VOL TPSL] Error: {e} — using base values")
             return base_tp_pips, base_sl_pips
+
+    def info(self) -> dict:
+        """Telemetry diagnostics."""
+        with self._lock:
+            return {
+                "atr_period": self.atr_period,
+                "min_tp_pips": self.min_tp_pips,
+                "max_tp_pips": self.max_tp_pips,
+                "min_sl_pips": self.min_sl_pips,
+                "max_sl_pips": self.max_sl_pips,
+            }
+
+    def reset(self) -> None:
+        """Lifecycle reset."""
+        pass
 
 
 # Module-level singleton

@@ -23,7 +23,7 @@ class LinearRegressor:
 
     def __init__(self):
         self._predictor = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def _get_predictor(self):
         with self._lock:
@@ -82,6 +82,14 @@ class LinearRegressor:
         """Most recent prediction dictionary."""
         return self._get_predictor().last_prediction
 
+    def reset(self) -> None:
+        """Reset underlying predictor state."""
+        return self._get_predictor().reset()
+
+    def info(self) -> dict:
+        """Telemetry diagnostics."""
+        return self._get_predictor().info()
+
 
 class MLPredictor:
     """
@@ -100,7 +108,7 @@ class MLPredictor:
         self._prediction_history: list = []  # (timestamp, direction, confidence)
         self._hit_count = 0
         self._total_checked = 0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     def predict(self, closes: list = None) -> dict:
@@ -260,9 +268,11 @@ class MLPredictor:
     # ------------------------------------------------------------------
     def record_outcome(self, predicted_direction: str, actual_direction: str):
         """Call after a trade closes to track ML accuracy."""
+        pred_str = str(predicted_direction).upper() if predicted_direction is not None else ""
+        act_str = str(actual_direction).upper() if actual_direction is not None else ""
         with self._lock:
             self._total_checked += 1
-            if predicted_direction == actual_direction and predicted_direction != "NEUTRAL":
+            if pred_str == act_str and pred_str not in ("NEUTRAL", ""):
                 self._hit_count += 1
 
     @property
@@ -276,6 +286,26 @@ class MLPredictor:
     def last_prediction(self) -> dict:
         with self._lock:
             return dict(self._last_prediction)
+
+    def reset(self) -> None:
+        """Reset internal predictions, history, and accuracy metrics."""
+        with self._lock:
+            self._last_prediction.clear()
+            self._prediction_history.clear()
+            self._hit_count = 0
+            self._total_checked = 0
+
+    def info(self) -> dict:
+        """Telemetry diagnostics dictionary."""
+        with self._lock:
+            return {
+                "window": self.window,
+                "min_r2": self.min_r2,
+                "total_checked": self._total_checked,
+                "hit_count": self._hit_count,
+                "accuracy_pct": self.accuracy,
+                "last_prediction": dict(self._last_prediction),
+            }
 
 
 # Module-level singleton
