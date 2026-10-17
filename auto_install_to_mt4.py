@@ -52,10 +52,11 @@ def install_to_target(target_dir):
     try:
         os.makedirs(mql4_experts, exist_ok=True)
         os.makedirs(mql4_presets, exist_ok=True)
-    except PermissionError as e:
+    except (PermissionError, FileNotFoundError, OSError) as e:
         print(f"  [ERROR] Cannot create directories in {target_dir}: {e}")
-        print("  Try running this script as Administrator.")
+        print("  Try running this script as Administrator or verify drive path.")
         return []
+
 
     installed_files = []
     errors = []

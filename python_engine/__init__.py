@@ -5,7 +5,8 @@ High-performance institutional algorithmic trading core.
 
 __version__ = "5.0.0"
 
-from .scalping_engine import ScalpingRobotV5, ScalpingSignal
+from .scalping_engine import ScalpingRobotV5, ScalpingSignal, EconomicNewsFilter, MarketRegime
+from .signal_engine import SignalEngine
 from .backtester import Backtester, ScalpingBacktester
 from .storage import atomic_write_json, safe_read_json
 from .live_runner import ScalpingLiveRunner
@@ -15,6 +16,9 @@ __all__ = [
     "__version__",
     "ScalpingRobotV5",
     "ScalpingSignal",
+    "EconomicNewsFilter",
+    "MarketRegime",
+    "SignalEngine",
     "Backtester",
     "ScalpingBacktester",
     "atomic_write_json",
@@ -23,5 +27,6 @@ __all__ = [
     "RiskGuard",
     "Decision",
 ]
+
 
 

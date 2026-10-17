@@ -14,6 +14,7 @@ import argparse
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import Optional
 
 # File Paths
 BASE_DIR = Path(__file__).resolve().parent
@@ -50,13 +51,20 @@ def calculate_grade(win_rate: float) -> str:
       - A+ if win_rate > 90
       - A  if win_rate > 85
       - B  if win_rate > 75 (or >= 75)
-      - C  if win_rate < 75
+      - C  if win_rate < 75 or non-finite
     """
-    if win_rate > 90.0:
+    try:
+        wr = float(win_rate)
+        if not math.isfinite(wr):
+            return "C"
+    except (ValueError, TypeError):
+        return "C"
+
+    if wr > 90.0:
         return "A+"
-    elif win_rate > 85.0:
+    elif wr > 85.0:
         return "A"
-    elif win_rate >= 75.0:
+    elif wr >= 75.0:
         return "B"
     else:
         return "C"
@@ -73,36 +81,40 @@ def _safe_float(val, default: float = 0.0) -> float:
         return default
 
 
-def evaluate_and_report() -> bool:
+def evaluate_and_report(status_file: Optional[Path] = None, report_file: Optional[Path] = None) -> bool:
     """
     Reads live_status.json, evaluates performance metrics,
     logs alerts if thresholds are breached, and outputs performance_report.txt.
     """
+    target_status = Path(status_file) if status_file is not None else STATUS_FILE
+    target_report = Path(report_file) if report_file is not None else REPORT_FILE
+
     logger.info("Starting performance evaluation cycle...")
 
-    if not STATUS_FILE.exists():
-        msg = f"Status file not found at {STATUS_FILE}"
+    if not target_status.exists():
+        msg = f"Status file not found at {target_status}"
         logger.error(msg)
         return False
 
     data = None
     for _attempt in range(3):
         try:
-            with open(STATUS_FILE, "r", encoding="utf-8") as f:
+            with open(target_status, "r", encoding="utf-8") as f:
                 data = json.load(f)
             break
         except json.JSONDecodeError:
             if _attempt < 2:
                 time.sleep(0.2)
         except Exception as e:
-            logger.error(f"Failed to read/parse {STATUS_FILE}: {e}")
+            logger.error(f"Failed to read/parse {target_status}: {e}")
             return False
     if data is None:
-        logger.error(f"Failed to parse {STATUS_FILE} after 3 attempts (concurrent write?)")
+        logger.error(f"Failed to parse {target_status} after 3 attempts (concurrent write?)")
         return False
 
     # Extract metrics — use `or` / _safe_float to handle null JSON values safely
     status = data.get("status") or "UNKNOWN"
+
     account_mode = data.get("account_mode") or "UNKNOWN"
     broker_name = data.get("broker_name") or "N/A"
     account_id = data.get("account_id") or data.get("broker_login") or "N/A"
@@ -227,14 +239,15 @@ def evaluate_and_report() -> bool:
 
     # Write report to performance_report.txt atomically
     try:
-        tmp_report = REPORT_FILE.with_suffix(".tmp")
+        tmp_report = target_report.with_suffix(".tmp")
         with open(tmp_report, "w", encoding="utf-8") as rf:
             rf.write(report_content)
-        tmp_report.replace(REPORT_FILE)
-        logger.info(f"Performance report successfully written to {REPORT_FILE}")
+        tmp_report.replace(target_report)
+        logger.info(f"Performance report successfully written to {target_report}")
     except Exception as e:
-        logger.error(f"Failed to write performance report to {REPORT_FILE}: {e}")
+        logger.error(f"Failed to write performance report to {target_report}: {e}")
         return False
+
 
     return True
 
