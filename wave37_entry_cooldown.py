@@ -4,6 +4,8 @@ Enforce a mandatory cooldown period after any trade closes (win or loss)
 to prevent revenge trading and overtrading in volatile markets.
 """
 
+import math
+import threading
 import time
 
 
@@ -17,6 +19,7 @@ class EntryCooldown:
     COOLDOWN_LOSS_SEC = 120    # 120s cooldown after a losing trade (revenge prevention)
 
     def __init__(self):
+        self._lock = threading.Lock()
         self._cooldown_until = 0.0
         self._last_cooldown_reason = "NONE"
         self.total_cooldowns_triggered = 0
@@ -24,50 +27,60 @@ class EntryCooldown:
         self.total_loss_cooldowns = 0
         self.last_trade_result = "NONE"
 
-    def record_trade_close(self, was_win: bool, pnl: float = 0.0):
+    def record_trade_close(self, was_win: bool, pnl: float = 0.0, now_ts: float = None):
         """
         Call after every trade closes.
         was_win: True if trade was profitable, False otherwise.
         pnl: trade profit/loss in USD (for logging).
         """
-        self.last_trade_result = "WIN" if was_win else "LOSS"
+        clean_pnl = float(pnl) if isinstance(pnl, (int, float)) and math.isfinite(pnl) else 0.0
+        now = now_ts if now_ts is not None else time.time()
         cooldown = self.COOLDOWN_WIN_SEC if was_win else self.COOLDOWN_LOSS_SEC
-        # FIX: use max() so a shorter new cooldown never truncates a longer active one
-        self._cooldown_until = max(self._cooldown_until, time.time() + cooldown)
-        self._last_cooldown_reason = (
-            f"{'WIN' if was_win else 'LOSS'} trade (PnL={pnl:+.2f}): {cooldown}s cooldown"
-        )
-        self.total_cooldowns_triggered += 1
-        if was_win:
-            self.total_win_cooldowns += 1
-        else:
-            self.total_loss_cooldowns += 1
 
-    def is_entry_blocked(self) -> bool:
+        with self._lock:
+            self.last_trade_result = "WIN" if was_win else "LOSS"
+            # FIX: use max() so a shorter new cooldown never truncates a longer active one
+            self._cooldown_until = max(self._cooldown_until, now + cooldown)
+            self._last_cooldown_reason = (
+                f"{'WIN' if was_win else 'LOSS'} trade (PnL={clean_pnl:+.2f}): {cooldown}s cooldown"
+            )
+            self.total_cooldowns_triggered += 1
+            if was_win:
+                self.total_win_cooldowns += 1
+            else:
+                self.total_loss_cooldowns += 1
+
+    def is_entry_blocked(self, now_ts: float = None) -> bool:
         """Returns True if in cooldown period — no new entries allowed."""
-        return time.time() < self._cooldown_until
+        now = now_ts if now_ts is not None else time.time()
+        with self._lock:
+            return now < self._cooldown_until
 
-    def seconds_remaining(self) -> float:
+    def seconds_remaining(self, now_ts: float = None) -> float:
         """Seconds until cooldown expires."""
-        return max(0.0, self._cooldown_until - time.time())
+        now = now_ts if now_ts is not None else time.time()
+        with self._lock:
+            return max(0.0, self._cooldown_until - now)
 
     def force_reset(self):
         """Manually clear the cooldown (e.g. on daily reset)."""
-        self._cooldown_until = 0.0
-        self._last_cooldown_reason = "RESET"
+        with self._lock:
+            self._cooldown_until = 0.0
+            self._last_cooldown_reason = "RESET"
 
     def info(self) -> dict:
-        return {
-            "cooldown_win_sec": self.COOLDOWN_WIN_SEC,
-            "cooldown_loss_sec": self.COOLDOWN_LOSS_SEC,
-            "currently_blocked": self.is_entry_blocked(),
-            "seconds_remaining": round(self.seconds_remaining(), 1),
-            "last_trade_result": self.last_trade_result,
-            "last_cooldown_reason": self._last_cooldown_reason,
-            "total_cooldowns_triggered": self.total_cooldowns_triggered,
-            "total_win_cooldowns": self.total_win_cooldowns,
-            "total_loss_cooldowns": self.total_loss_cooldowns,
-        }
+        with self._lock:
+            return {
+                "cooldown_win_sec": self.COOLDOWN_WIN_SEC,
+                "cooldown_loss_sec": self.COOLDOWN_LOSS_SEC,
+                "currently_blocked": time.time() < self._cooldown_until,
+                "seconds_remaining": round(max(0.0, self._cooldown_until - time.time()), 1),
+                "last_trade_result": self.last_trade_result,
+                "last_cooldown_reason": self._last_cooldown_reason,
+                "total_cooldowns_triggered": self.total_cooldowns_triggered,
+                "total_win_cooldowns": self.total_win_cooldowns,
+                "total_loss_cooldowns": self.total_loss_cooldowns,
+            }
 
 
 # Module-level singleton

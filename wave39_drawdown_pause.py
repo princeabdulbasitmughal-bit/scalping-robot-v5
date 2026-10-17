@@ -2,6 +2,7 @@
 Wave 39: DrawdownPause
 If equity drops > 1.5% from peak in the last 30 minutes → pause all entries for 15 minutes.
 """
+import math
 import time
 import logging
 import threading
@@ -27,23 +28,39 @@ class DrawdownPause:
         self._last_trigger_reason: str = ""
         self._lock = threading.Lock()
 
-    # ------------------------------------------------------------------
-    def update(self, equity: float) -> None:
-        """Call every tick / position check with the current equity value."""
-        now = time.time()
+    def reset(self) -> None:
+        """Reset equity history, triggers, and unblock."""
         with self._lock:
-            self._equity_history.append((now, equity))
+            self._equity_history.clear()
+            self._blocked_until = 0.0
+            self._last_trigger_reason = ""
+
+    # ------------------------------------------------------------------
+    def update(self, equity: float, now_ts: float = None) -> None:
+        """Call every tick / position check with the current equity value."""
+        if (
+            equity is None
+            or not isinstance(equity, (int, float))
+            or not math.isfinite(equity)
+            or equity <= 0
+        ):
+            return
+
+        now = now_ts if now_ts is not None else time.time()
+        with self._lock:
+            self._equity_history.append((now, float(equity)))
             # Prune stale entries older than WINDOW_SEC
             cutoff = now - self.WINDOW_SEC
             while self._equity_history and self._equity_history[0][0] < cutoff:
                 self._equity_history.popleft()
 
     # ------------------------------------------------------------------
-    def is_entry_blocked(self, balance: float = None) -> bool:
+    def is_entry_blocked(self, balance: float = None, now_ts: float = None) -> bool:
         """Return True if entries should be paused due to recent drawdown."""
+        now = now_ts if now_ts is not None else time.time()
         if balance is not None:
-            self.update(balance)
-        now = time.time()
+            self.update(balance, now_ts=now)
+
         with self._lock:
             if now < self._blocked_until:
                 remaining = self._blocked_until - now
@@ -51,6 +68,11 @@ class DrawdownPause:
                     f"[DRAWDOWN PAUSE] Entry blocked for {remaining:.0f}s more — {self._last_trigger_reason}"
                 )
                 return True
+
+            # Prune stale entries older than WINDOW_SEC using current now
+            cutoff = now - self.WINDOW_SEC
+            while self._equity_history and self._equity_history[0][0] < cutoff:
+                self._equity_history.popleft()
 
             if len(self._equity_history) < 2:
                 return False
@@ -77,6 +99,11 @@ class DrawdownPause:
             return False
 
     # ------------------------------------------------------------------
+    def seconds_remaining(self, now_ts: float = None) -> float:
+        now = now_ts if now_ts is not None else time.time()
+        with self._lock:
+            return max(0.0, self._blocked_until - now)
+
     def info(self) -> dict:
         now = time.time()
         with self._lock:

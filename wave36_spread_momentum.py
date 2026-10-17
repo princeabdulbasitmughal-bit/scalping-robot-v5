@@ -30,9 +30,24 @@ class SpreadMomentumGuard:
         self.last_spike_ratio = 0.0
         self.last_spread = 0.0
 
-    def update(self, spread_pips: float):
+    def reset(self) -> None:
+        """Reset internal metrics, spread history, and blocks."""
+        with self._lock:
+            self._spread_history.clear()
+            self._block_until = 0.0
+            self.total_spikes_detected = 0
+            self.total_blocks = 0
+            self.last_spike_ratio = 0.0
+            self.last_spread = 0.0
+
+    def update(self, spread_pips: float, now_ts: float = None):
         """Feed current spread. Call every tick."""
-        if spread_pips is None or math.isnan(spread_pips) or math.isinf(spread_pips) or spread_pips <= 0:
+        if (
+            spread_pips is None
+            or not isinstance(spread_pips, (int, float))
+            or not math.isfinite(spread_pips)
+            or spread_pips <= 0
+        ):
             return
 
         with self._lock:
@@ -40,9 +55,9 @@ class SpreadMomentumGuard:
             self.last_spread = float(spread_pips)
 
             if len(self._spread_history) >= self.MIN_TICKS:
-                self._check_spike()
+                self._check_spike(now_ts)
 
-    def _check_spike(self):
+    def _check_spike(self, now_ts: float = None):
         spreads = list(self._spread_history)
         # Baseline = average of all but last tick
         if len(spreads) < 2:
@@ -54,7 +69,7 @@ class SpreadMomentumGuard:
         ratio = current / baseline
         self.last_spike_ratio = ratio
         if ratio >= self.SPIKE_RATIO:
-            now = time.time()
+            now = now_ts if now_ts is not None else time.time()
             if now >= self._block_until:
                 # New spike - count new event
                 self.total_spikes_detected += 1
@@ -62,15 +77,17 @@ class SpreadMomentumGuard:
             # Extend block window to protect against prolonged illiquidity
             self._block_until = max(self._block_until, now + self.BLOCK_SECONDS)
 
-    def is_entry_blocked(self) -> bool:
+    def is_entry_blocked(self, now_ts: float = None) -> bool:
         """Returns True if spread spike block is active."""
+        now = now_ts if now_ts is not None else time.time()
         with self._lock:
-            return time.time() < self._block_until
+            return now < self._block_until
 
-    def seconds_remaining(self) -> float:
+    def seconds_remaining(self, now_ts: float = None) -> float:
         """Seconds until spread block expires."""
+        now = now_ts if now_ts is not None else time.time()
         with self._lock:
-            return max(0.0, self._block_until - time.time())
+            return max(0.0, self._block_until - now)
 
     def info(self) -> dict:
         with self._lock:
