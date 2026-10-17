@@ -48,7 +48,7 @@ class MomentumConfirmation:
         self._min_ticks_in_dir = max(1, min(raw_min, self._lookback))
         self._price_buffer: deque[float] = deque(maxlen=self._lookback + 1)
         self._total_rejections: int = 0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------ #
     #  Public API                                                        #

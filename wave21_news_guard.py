@@ -20,7 +20,9 @@ _OVERRIDE_FILE   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "new
 class NewsGuard:
     """Blocks trading during high-impact news windows."""
 
-    def __init__(self):
+    def __init__(self, status_file: str = None, override_file: str = None):
+        self._status_file = status_file or _NEWS_STATUS_FILE
+        self._override_file = override_file or _OVERRIDE_FILE
         self._last_check_time: float = 0.0
         self._cached_avoid: bool = False
         self._cached_reason: str = "no data"
@@ -38,8 +40,8 @@ class NewsGuard:
 
         # Manual override: {"override": true} → always allow
         try:
-            if os.path.exists(_OVERRIDE_FILE):
-                with open(_OVERRIDE_FILE, "r", encoding="utf-8") as f:
+            if os.path.exists(self._override_file):
+                with open(self._override_file, "r", encoding="utf-8") as f:
                     ov = json.load(f)
                 if ov.get("override", False):
                     self._cached_avoid = False
@@ -50,11 +52,11 @@ class NewsGuard:
 
         # Read news_status.json
         try:
-            if not os.path.exists(_NEWS_STATUS_FILE):
+            if not os.path.exists(self._status_file):
                 self._cached_avoid = False
                 self._cached_reason = "news_status.json not found — allow"
                 return
-            with open(_NEWS_STATUS_FILE, "r", encoding="utf-8") as f:
+            with open(self._status_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             avoid = bool(data.get("avoid_trading", False))

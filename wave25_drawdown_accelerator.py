@@ -64,9 +64,9 @@ class DrawdownAccelerator:
         with self._lock:
             if won:
                 self._consec_wins += 1
-                self._consec_losses = 0
                 if self._consec_wins >= self._recovery_wins:
                     # Full recovery
+                    self._consec_losses = 0
                     self._consec_wins = 0
                     logger.info(
                         "[WAVE25] %d consecutive wins → lot multiplier RESET to 1.0",
@@ -101,12 +101,14 @@ class DrawdownAccelerator:
             return self._get_multiplier()
 
     def info(self) -> dict:
-        """Return status dict for live_status.json."""
+        """Return status dict for live_status.json and telemetry."""
         with self._lock:
+            mult = self._get_multiplier()
             return {
                 "consec_losses": self._consec_losses,
                 "consec_wins": self._consec_wins,
-                "lot_multiplier": round(self._get_multiplier(), 2),
+                "lot_multiplier": round(mult, 2),
+                "current_multiplier": mult,
                 "total_reductions": self._total_reductions,
                 "mode": self._mode_label(),
             }
@@ -136,17 +138,6 @@ class DrawdownAccelerator:
         if m >= 0.20:
             return "QUARTER_SIZE"
         return "MICRO_SIZE"
-
-    def info(self) -> dict:
-        """Telemetry diagnostics."""
-        with self._lock:
-            return {
-                "consec_losses": self._consec_losses,
-                "consec_wins": self._consec_wins,
-                "total_reductions": self._total_reductions,
-                "current_multiplier": self._get_multiplier(),
-                "mode": self._mode_label(),
-            }
 
 
 # Module-level singleton
