@@ -71,14 +71,41 @@ def calculate_grade(win_rate: float) -> str:
 
 
 def _safe_float(val, default: float = 0.0) -> float:
-    """Safely convert a value to finite float; returns default on None, str, NaN, Inf or invalid values."""
-    if val is None:
+    """Safely convert a value to finite float; returns default on None, bool, str, NaN, Inf or invalid values."""
+    if val is None or isinstance(val, bool):
         return default
     try:
         f = float(val)
         return f if math.isfinite(f) else default
     except (ValueError, TypeError):
         return default
+
+
+def is_entry_blocked(status_file: Optional[Path] = None) -> bool:
+    """Returns True if win_rate < 75% or daily_pnl < -100 in live_status.json."""
+    target = Path(status_file) if status_file is not None else STATUS_FILE
+    try:
+        if not target.exists():
+            return False
+        with open(target, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        daily_pnl = _safe_float(data.get("daily_pnl"), 0.0)
+        total_trades = int(data.get("total_trades") or 0)
+        raw_win_rate = data.get("win_rate") if data.get("win_rate") is not None else data.get("win_rate_pct")
+        win_rate = _safe_float(raw_win_rate, 0.0)
+        if 0.0 < win_rate <= 1.0 and total_trades > 0:
+            win_rate *= 100.0
+        if daily_pnl < -100.0 or (total_trades > 0 and win_rate < 75.0):
+            return True
+        return False
+    except Exception as e:
+        logger.warning(f"performance_monitor is_entry_blocked error: {e}")
+        return True  # fail-closed
+
+
+def is_blocked(status_file: Optional[Path] = None) -> bool:
+    return is_entry_blocked(status_file=status_file)
+
 
 
 def evaluate_and_report(status_file: Optional[Path] = None, report_file: Optional[Path] = None) -> bool:

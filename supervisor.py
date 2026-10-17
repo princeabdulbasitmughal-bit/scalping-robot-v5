@@ -29,16 +29,35 @@ def calculate_backoff(consecutive_failures: int) -> int:
     """Calculate exponential backoff seconds for consecutive failures.
 
     Exponential progression: 8s, 16s, 32s, 64s, 120s (capped at _MAX_BACKOFF_SEC).
-    Returns 0 if consecutive_failures <= 0.
+    Returns 0 if consecutive_failures <= 0 or invalid.
     """
+    if isinstance(consecutive_failures, bool) or not isinstance(consecutive_failures, (int, float)):
+        return 0
     if consecutive_failures <= 0:
         return 0
-    return min(8 * (2 ** (consecutive_failures - 1)), _MAX_BACKOFF_SEC)
+    return int(min(8 * (2 ** (int(consecutive_failures) - 1)), _MAX_BACKOFF_SEC))
 
 
 def check_circuit_breaker(consecutive_failures: int) -> bool:
     """Check if consecutive failures exceeded circuit breaker threshold."""
-    return consecutive_failures >= _MAX_CONSECUTIVE_FAILURES
+    if isinstance(consecutive_failures, bool) or not isinstance(consecutive_failures, (int, float)):
+        return False
+    return int(consecutive_failures) >= _MAX_CONSECUTIVE_FAILURES
+
+
+def is_entry_blocked() -> bool:
+    """Returns True if watchdog_runner is down or PID cannot be found."""
+    try:
+        pid = get_watchdog_pid()
+        return pid is None
+    except Exception as e:
+        log(f"is_entry_blocked error: {e}")
+        return True  # fail-closed
+
+
+def is_blocked() -> bool:
+    return is_entry_blocked()
+
 
 
 def log(msg, log_file=None):
