@@ -9,6 +9,7 @@ import json
 import os
 import time
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class NewsGuard:
         self._cached_reason: str = "no data"
         self._cache_ttl: float = 60.0   # re-read file every 60 s
         self._blocked_count: int = 0
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     def _load(self) -> None:
@@ -78,21 +80,23 @@ class NewsGuard:
         Returns (allowed: bool, reason: str).
         Call before entering a trade.
         """
-        self._load()
-        if self._cached_avoid:
-            self._blocked_count += 1
-            logger.info(f"[NEWS GUARD] BLOCKED #{self._blocked_count}: {self._cached_reason}")
-            return False, self._cached_reason
-        return True, self._cached_reason
+        with self._lock:
+            self._load()
+            if self._cached_avoid:
+                self._blocked_count += 1
+                logger.info(f"[NEWS GUARD] BLOCKED #{self._blocked_count}: {self._cached_reason}")
+                return False, self._cached_reason
+            return True, self._cached_reason
 
     def info(self) -> dict:
         """Summary dict for live_status.json."""
-        self._load()
-        return {
-            "avoid_trading": self._cached_avoid,
-            "reason": self._cached_reason,
-            "blocked_total": self._blocked_count,
-        }
+        with self._lock:
+            self._load()
+            return {
+                "avoid_trading": self._cached_avoid,
+                "reason": self._cached_reason,
+                "blocked_total": self._blocked_count,
+            }
 
 
 # Module-level singleton

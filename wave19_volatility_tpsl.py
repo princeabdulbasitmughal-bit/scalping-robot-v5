@@ -40,13 +40,25 @@ class VolatilityTPSLAdjuster:
 
     def _calc_atr(self, closes: list = None) -> float:
         """ATR proxy: mean of abs(close[i] - close[i-1]) over last atr_period bars."""
-        if not closes or len(closes) < 2:
+        if not closes or not isinstance(closes, (list, tuple)) or len(closes) < 2:
             return 0.5
-        diffs = [abs(closes[i] - closes[i - 1]) for i in range(1, len(closes))]
+        clean_closes = []
+        for c in closes:
+            if c is not None:
+                try:
+                    f = float(c)
+                    if math.isfinite(f):
+                        clean_closes.append(f)
+                except (ValueError, TypeError):
+                    continue
+        if len(clean_closes) < 2:
+            return 0.5
+        diffs = [abs(clean_closes[i] - clean_closes[i - 1]) for i in range(1, len(clean_closes))]
         recent = diffs[-self.atr_period:] if len(diffs) >= self.atr_period else diffs
         if not recent:
             return 0.5
-        return sum(recent) / len(recent)
+        val = sum(recent) / len(recent)
+        return val if math.isfinite(val) and val > 0 else 0.5
 
     def adjusted_tpsl(
         self,
@@ -62,6 +74,11 @@ class VolatilityTPSLAdjuster:
         Low-vol:   TP tightens to 0.75x, SL tightens to 0.85x (lock in small wins)
         Normal:    No change
         """
+        if not isinstance(base_tp_pips, (int, float)) or not math.isfinite(base_tp_pips) or base_tp_pips <= 0:
+            base_tp_pips = 45.0
+        if not isinstance(base_sl_pips, (int, float)) or not math.isfinite(base_sl_pips) or base_sl_pips <= 0:
+            base_sl_pips = 30.0
+
         if closes is None:
             closes = []
         try:
@@ -73,7 +90,9 @@ class VolatilityTPSLAdjuster:
             # Session vol_index (1.0 = normal, 1.5+ = high, 0.5- = low)
             vol_idx = 1.0
             if session_info and isinstance(session_info, dict):
-                vol_idx = float(session_info.get("vol_index", 1.0))
+                raw_v = session_info.get("vol_index", 1.0)
+                if isinstance(raw_v, (int, float)) and math.isfinite(raw_v):
+                    vol_idx = float(raw_v)
 
             # Combined volatility score
             vol_score = (atr_ratio + vol_idx) / 2.0

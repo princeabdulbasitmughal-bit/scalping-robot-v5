@@ -25,6 +25,8 @@ LOG_FILE = BASE_DIR / "monitor.log"
 logger = logging.getLogger("PerformanceMonitor")
 logger.setLevel(logging.INFO)
 
+import math
+
 # Avoid duplicate handlers if reloaded
 if not logger.handlers:
     # Rotating File Handler — prevents unbounded disk growth in daemon mode
@@ -61,11 +63,12 @@ def calculate_grade(win_rate: float) -> str:
 
 
 def _safe_float(val, default: float = 0.0) -> float:
-    """Safely convert a value to float; returns default on None, str, or invalid values."""
+    """Safely convert a value to finite float; returns default on None, str, NaN, Inf or invalid values."""
     if val is None:
         return default
     try:
-        return float(val)
+        f = float(val)
+        return f if math.isfinite(f) else default
     except (ValueError, TypeError):
         return default
 
@@ -222,10 +225,12 @@ def evaluate_and_report() -> bool:
 
     report_content = "\n".join(report_lines)
 
-    # Write report to performance_report.txt
+    # Write report to performance_report.txt atomically
     try:
-        with open(REPORT_FILE, "w", encoding="utf-8") as rf:
+        tmp_report = REPORT_FILE.with_suffix(".tmp")
+        with open(tmp_report, "w", encoding="utf-8") as rf:
             rf.write(report_content)
+        tmp_report.replace(REPORT_FILE)
         logger.info(f"Performance report successfully written to {REPORT_FILE}")
     except Exception as e:
         logger.error(f"Failed to write performance report to {REPORT_FILE}: {e}")
