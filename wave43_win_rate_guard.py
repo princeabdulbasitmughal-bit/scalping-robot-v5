@@ -8,6 +8,7 @@ import time
 import threading
 from collections import deque
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +32,10 @@ class WinRateGuard:
                  pause_sec: float = None,
                  **kwargs):
         self._min_trades = max(1, int(min_trades))
-        self._threshold = float(threshold if threshold is not None else win_rate_threshold)
-        self._pause_sec = float(pause_sec if pause_sec is not None else pause_duration_sec)
+        t_val = kwargs.get("min_win_rate", threshold if threshold is not None else win_rate_threshold)
+        self._threshold = float(t_val)
+        p_val = kwargs.get("pause_seconds", pause_sec if pause_sec is not None else pause_duration_sec)
+        self._pause_sec = float(p_val)
         # Ensure window is at least min_trades to prevent silent guard deactivation
         self._window = max(window, self._min_trades)
         self._results: deque = deque(maxlen=self._window)   # 1=win, 0=loss
@@ -45,10 +48,10 @@ class WinRateGuard:
             self._results.clear()
             self._pause_until = 0.0
 
-    def record_trade(self, won: bool) -> None:
+    def record_trade(self, won: bool, now_ts: Optional[float] = None) -> None:
         """Call after each trade closes. won=True for win, False for loss."""
         try:
-            now = time.time()
+            now = time.time() if now_ts is None else float(now_ts)
             log_warning = False
             log_msg = ""
             with self._lock:
@@ -91,10 +94,10 @@ class WinRateGuard:
         with self._lock:
             return self._current_win_rate_unsafe()
 
-    def is_entry_blocked(self) -> bool:
+    def is_entry_blocked(self, now_ts: Optional[float] = None) -> bool:
         """Return True if entries should be paused."""
         try:
-            now = time.time()
+            now = time.time() if now_ts is None else float(now_ts)
             blocked = False
             remaining = 0.0
             with self._lock:

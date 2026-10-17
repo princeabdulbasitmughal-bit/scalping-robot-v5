@@ -39,6 +39,8 @@ class TickVolumeFilter:
         spike_ratio_threshold: float = _DEFAULT_SPIKE_RATIO,
         spike_cooldown_sec: float = _DEFAULT_SPIKE_COOLDOWN_SEC,
         baseline_sec: float = _DEFAULT_BASELINE_SEC,
+        spike_rate_limit: Optional[float] = None,
+        **kwargs,
     ) -> None:
         self._window_sec = float(window_sec) if window_sec and window_sec > 0 else _DEFAULT_WINDOW_SEC
         self._min_ticks = int(min_ticks)
@@ -46,6 +48,7 @@ class TickVolumeFilter:
         self._spike_ratio_threshold = float(spike_ratio_threshold)
         self._spike_cooldown_sec = float(spike_cooldown_sec)
         self._baseline_sec = float(baseline_sec) if baseline_sec and baseline_sec > 0 else _DEFAULT_BASELINE_SEC
+        self._spike_rate_limit = float(spike_rate_limit) if spike_rate_limit is not None else None
 
         self._tick_times: deque = deque(maxlen=_MAX_HISTORY_TICKS)
         self._blocked_count: int = 0
@@ -122,10 +125,11 @@ class TickVolumeFilter:
                 return True
 
             # 4. Volume spike check (relative surge vs baseline)
+            # Only evaluate relative surge if baseline window has accumulated sufficient samples
             if self._baseline_sec > self._window_sec and self._spike_ratio_threshold > 0:
                 baseline_ticks = self._count_ticks_in_window_locked(self._baseline_sec, now)
-                # Division-by-zero safety on baseline ticks and duration
-                if baseline_ticks > 0 and self._baseline_sec > 0:
+                min_baseline_required = max(30, self._min_ticks * 4)
+                if baseline_ticks >= min_baseline_required and self._baseline_sec > 0:
                     recent_rate = recent / self._window_sec
                     baseline_rate = baseline_ticks / self._baseline_sec
                     if baseline_rate > 0.0:
@@ -139,6 +143,15 @@ class TickVolumeFilter:
                                 f"baseline {baseline_rate:.1f}/s. Blocking entries for {self._spike_cooldown_sec:.0f}s"
                             )
                             return True
+
+            # 5. Optional explicit spike rate limit
+            if self._spike_rate_limit is not None and self._spike_rate_limit > 0:
+                recent_rate = recent / self._window_sec
+                if recent_rate >= self._spike_rate_limit:
+                    self._spike_blocked_count += 1
+                    self._cooldown_until = now + self._spike_cooldown_sec
+                    self._last_block_reason = f"VOLUME_SPIKE_RATE ({recent_rate:.1f} >= {self._spike_rate_limit:.1f})"
+                    return True
 
             self._last_block_reason = ""
             return False

@@ -33,11 +33,14 @@ class LondonOpenBooster:
         start_hour_utc: int = _LONDON_OPEN_START_UTC,
         end_hour_utc: int = _LONDON_OPEN_END_UTC,
         score_discount: float = _DEFAULT_SCORE_DISCOUNT,
+        discount: Optional[float] = None,
+        **kwargs,
     ):
         self._lock = threading.Lock()
         self._start: int = int(start_hour_utc) % 24
         self._end: int = int(end_hour_utc) % 24
-        self._discount: float = self._clamp_discount(score_discount)
+        eff_discount = discount if discount is not None else score_discount
+        self._discount: float = self._clamp_discount(eff_discount)
 
         # Telemetry & State
         self._total_boosts: int = 0
