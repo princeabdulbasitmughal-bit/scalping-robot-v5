@@ -38,8 +38,9 @@ REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 REPORT_FILE = REPORTS_DIR / "swarm_100_scalping_report.json"
 
 class ScalpingSwarm100:
-    def __init__(self):
-        self.root = ROOT_DIR
+    def __init__(self, root_dir: Optional[Path] = None, report_file: Optional[Path] = None):
+        self.root = Path(root_dir) if root_dir is not None else ROOT_DIR
+        self.report_file = Path(report_file) if report_file is not None else REPORT_FILE
         self._lock = threading.RLock()
         self.last_report: Optional[Dict[str, Any]] = None
 
@@ -224,13 +225,13 @@ class ScalpingSwarm100:
             self.last_report = report
 
         if save_report:
-            tmp_report = REPORT_FILE.with_suffix(".tmp")
+            tmp_report = self.report_file.with_suffix(".tmp")
             try:
                 with open(tmp_report, "w", encoding="utf-8") as f:
                     json.dump(report, f, indent=2, ensure_ascii=False)
-                tmp_report.replace(REPORT_FILE)
+                tmp_report.replace(self.report_file)
             except Exception:
-                with open(REPORT_FILE, "w", encoding="utf-8") as f:
+                with open(self.report_file, "w", encoding="utf-8") as f:
                     json.dump(report, f, indent=2, ensure_ascii=False)
 
         print(f"\n✅ 100-Subagent Swarm Completed in {total_time_ms}ms!")
