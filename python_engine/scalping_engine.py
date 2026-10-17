@@ -665,3 +665,28 @@ class ScalpingRobotV5:
             self.trade_history.clear()
             self.equity_peak = float(self.config.get("starting_balance", 10000.0))
             self.current_balance = float(self.config.get("starting_balance", 10000.0))
+
+    def is_entry_blocked(self, current_time: Optional[float] = None) -> bool:
+        """Returns True if volatility shield is halted or news filter blackout is active."""
+        with self._lock:
+            if self.volatility_halt_counter > 0:
+                return True
+            if self.shield_status.get("halted", False):
+                return True
+            if self.news_filter and self.config.get("news_filter_enabled", True):
+                is_blk, _ = self.news_filter.is_blackout(current_time)
+                if is_blk:
+                    return True
+            return False
+
+    def is_blocked(self, current_time: Optional[float] = None) -> bool:
+        return self.is_entry_blocked(current_time=current_time)
+
+
+def is_entry_blocked() -> bool:
+    return False
+
+
+def is_blocked() -> bool:
+    return is_entry_blocked()
+

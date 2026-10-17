@@ -232,3 +232,19 @@ class SignalEngine:
                 "macd": {"macd_line": 0.0, "signal_line": 0.0, "histogram": 0.0, "cross": "NONE"},
                 "ema_cross": "NEUTRAL",
             }
+
+    def is_entry_blocked(self) -> bool:
+        """SignalEngine does not block trading entries directly."""
+        return False
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
+
+
+def is_entry_blocked() -> bool:
+    return False
+
+
+def is_blocked() -> bool:
+    return is_entry_blocked()
+
