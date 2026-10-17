@@ -181,6 +181,20 @@ class SessionPnLTracker:
             logger.error(f"[W51-SessionPnL] is_entry_blocked error: {e}", exc_info=True)
             return True  # fail-closed
 
+    def is_blocked(self, now_dt: Optional[datetime] = None) -> bool:
+        """Standard alias for is_entry_blocked."""
+        return self.is_entry_blocked(now_dt=now_dt)
+
+    def is_trading_allowed(self, now_dt: Optional[datetime] = None) -> Tuple[bool, str]:
+        """Returns (True, '') if clear, (False, reason) if session loss limit exceeded."""
+        blocked = self.is_entry_blocked(now_dt=now_dt)
+        if blocked:
+            with self._lock:
+                key, session = self._key(now_dt)
+                pnl = self._session_pnl.get(key, 0.0)
+                return False, f"SESSION_LOSS_LIMIT: {session} loss ${pnl:.2f} < ${self._loss_limit:.2f}"
+        return True, ""
+
     def unblock_session(self, session: Optional[str] = None, now_dt: Optional[datetime] = None) -> bool:
         """Manually unblock the current or specified session (admin override)."""
         try:
