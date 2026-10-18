@@ -327,6 +327,7 @@ class ScalpingSwarm30:
             self.last_report = report
 
         if save_report:
+            self.report_file.parent.mkdir(parents=True, exist_ok=True)
             tmp_report = self.report_file.with_suffix(".tmp")
             try:
                 with open(tmp_report, "w", encoding="utf-8") as f:
@@ -351,7 +352,28 @@ class ScalpingSwarm30:
         with self._lock:
             return self.last_report
 
+    def is_entry_blocked(self) -> bool:
+        """Returns True if swarm report reflects excessive degraded subagents (>10 WARN)."""
+        with self._lock:
+            if self.last_report:
+                warn = self.last_report.get("warn_count", 0)
+                if isinstance(warn, (int, float)) and warn > 10:
+                    return True
+            return False
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
+
+
+def is_entry_blocked() -> bool:
+    return False
+
+
+def is_blocked() -> bool:
+    return is_entry_blocked()
+
 
 if __name__ == "__main__":
     swarm = ScalpingSwarm30()
     swarm.run_swarm()
+

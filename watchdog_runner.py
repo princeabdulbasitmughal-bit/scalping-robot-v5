@@ -77,11 +77,30 @@ def calculate_backoff(consecutive_restarts: int) -> int:
     Exponential backoff:
     restart_delay = min(300, 30 * (2 ** consecutive_restarts))
     """
-    try:
-        count = max(0, int(consecutive_restarts))
-    except (ValueError, TypeError):
+    if isinstance(consecutive_restarts, bool):
         count = 0
+    else:
+        try:
+            count = max(0, int(consecutive_restarts))
+        except (ValueError, TypeError):
+            count = 0
     return min(300, int(30 * (2 ** count)))
+
+
+def is_entry_blocked(status_file: Path = STATUS_FILE) -> bool:
+    """Returns True if live_status indicates an unhealthy, stale, or halted trader."""
+    try:
+        if not status_file.exists():
+            return False
+        return not health_check(status_file=status_file)
+    except Exception as e:
+        log(f"watchdog is_entry_blocked error: {e}")
+        return True  # fail-closed
+
+
+def is_blocked(status_file: Path = STATUS_FILE) -> bool:
+    return is_entry_blocked(status_file=status_file)
+
 
 
 
