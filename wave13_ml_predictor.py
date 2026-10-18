@@ -324,3 +324,13 @@ class MLPredictor:
 
 # Module-level singleton
 ml_predictor = MLPredictor(window=20, min_r2=0.20)
+
+
+def is_entry_blocked() -> bool:
+    """Module-level risk check alias."""
+    return ml_predictor.is_entry_blocked()
+
+
+def is_blocked() -> bool:
+    """Module-level risk check alias."""
+    return is_entry_blocked()

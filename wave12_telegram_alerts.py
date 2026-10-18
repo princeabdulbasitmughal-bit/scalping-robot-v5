@@ -294,3 +294,13 @@ class TelegramAlerter:
 
 # ── Module-level singleton ─────────────────────────────────────────────────
 telegram_alerter = TelegramAlerter()
+
+
+def is_entry_blocked() -> bool:
+    """Module-level risk check alias."""
+    return telegram_alerter.is_entry_blocked()
+
+
+def is_blocked() -> bool:
+    """Module-level risk check alias."""
+    return is_entry_blocked()
