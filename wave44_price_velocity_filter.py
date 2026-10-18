@@ -133,3 +133,16 @@ class PriceVelocityFilter:
 
 # Module-level singleton
 price_velocity_filter = PriceVelocityFilter()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(now_ts: Optional[float] = None) -> bool:
+    return price_velocity_filter.is_entry_blocked(now_ts=now_ts)
+
+def is_blocked(now_ts: Optional[float] = None) -> bool:
+    return price_velocity_filter.is_entry_blocked(now_ts=now_ts)
+
+def update(price: Any, now_ts: Optional[float] = None) -> None:
+    price_velocity_filter.update(price, now_ts=now_ts)
+
+def reset() -> None:
+    price_velocity_filter.reset()

@@ -178,3 +178,13 @@ class LondonOpenBooster:
 
 # Module-level singleton
 london_open_booster = LondonOpenBooster()
+
+# Module-level aliases for risk orchestrator integration
+def is_active(now_dt: Optional[datetime] = None) -> bool:
+    return london_open_booster.is_active(now_dt=now_dt)
+
+def adjust_min_score(min_score: float, now_dt: Optional[datetime] = None) -> float:
+    return london_open_booster.adjust_min_score(min_score, now_dt=now_dt)
+
+def reset() -> None:
+    london_open_booster.reset()
