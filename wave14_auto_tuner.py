@@ -147,6 +147,8 @@ class AutoTuner:
                     "trades_analysed": len(trade_history) if isinstance(trade_history, (list, tuple)) else 0,
                     "min_required": self.MIN_TRADES,
                     "suggestions": [],
+                    "config_changed": False,
+                    "proposed_config": {},
                 }
 
             trades = trade_history[-50:]  # last 50 max
@@ -326,6 +328,13 @@ class AutoTuner:
         with self._lock:
             return now - self._last_run if self._last_run > 0 else float("inf")
 
+    def is_entry_blocked(self) -> bool:
+        """Unified risk interface: auto-tuner does not block trade execution."""
+        return False
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
+
     def reset(self) -> None:
         """Reset internal tuning reports and timers."""
         with self._lock:
@@ -335,3 +344,13 @@ class AutoTuner:
 
 # Module-level singleton
 auto_tuner = AutoTuner()
+
+
+def is_entry_blocked() -> bool:
+    """Module-level risk check alias."""
+    return auto_tuner.is_entry_blocked()
+
+
+def is_blocked() -> bool:
+    """Module-level risk check alias."""
+    return is_entry_blocked()

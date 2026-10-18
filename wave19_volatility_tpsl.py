@@ -156,6 +156,13 @@ class VolatilityTPSLAdjuster:
                 "max_sl_pips": self.max_sl_pips,
             }
 
+    def is_entry_blocked(self) -> bool:
+        """Unified risk interface: TP/SL volatility adjuster does not block entries."""
+        return False
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
+
     def reset(self) -> None:
         """Lifecycle reset."""
         pass
@@ -163,3 +170,13 @@ class VolatilityTPSLAdjuster:
 
 # Module-level singleton
 vol_tpsl_adjuster = VolatilityTPSLAdjuster()
+
+
+def is_entry_blocked() -> bool:
+    """Module-level risk check alias."""
+    return vol_tpsl_adjuster.is_entry_blocked()
+
+
+def is_blocked() -> bool:
+    """Module-level risk check alias."""
+    return is_entry_blocked()
