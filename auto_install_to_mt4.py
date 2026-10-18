@@ -9,11 +9,14 @@ import sys
 import shutil
 import glob
 import string
+import threading
 from pathlib import Path
+from typing import List, Optional, Union
 
 CURRENT_DIR = Path(__file__).resolve().parent
 EXPERTS_SRC = CURRENT_DIR / "Scalping Robot V5" / "MQL4" / "Experts"
 PRESETS_SRC = CURRENT_DIR / "Presets"
+_lock = threading.RLock()
 
 def find_mt4_directories():
     found = []
@@ -156,6 +159,17 @@ def main():
     print('3. Drag "Scalping Robot 5.0 EA" onto a 1-Minute (M1) or 5-Minute (M5) XAUUSD or EURUSD chart.')
     print('4. Click "Load" and choose Safe_Scalper_XAUUSD_M1.set or Conservative_EURUSD_M5.set.')
     print("="*70)
+
+
+def is_entry_blocked() -> bool:
+    """Safe installer risk alias."""
+    return False
+
+
+def is_blocked() -> bool:
+    """Unified risk check alias."""
+    return is_entry_blocked()
+
 
 if __name__ == "__main__":
     main()
