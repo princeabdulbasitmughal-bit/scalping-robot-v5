@@ -189,3 +189,26 @@ class ATRPositionSizer:
 
 # Module-level singleton
 atr_position_sizer = ATRPositionSizer()
+
+# Module-level aliases for risk orchestrator integration
+def get_sl_tp(base_sl: float = _SL_BASE, base_tp: float = _TP_BASE) -> Tuple[float, float]:
+    return atr_position_sizer.get_sl_tp(base_sl=base_sl, base_tp=base_tp)
+
+def get_lot_size(
+    account_balance: Any,
+    risk_pct: float = 0.01,
+    sl_pips: Optional[float] = None,
+    pip_value: float = 10.0,
+) -> float:
+    return atr_position_sizer.get_lot_size(
+        account_balance=account_balance,
+        risk_pct=risk_pct,
+        sl_pips=sl_pips,
+        pip_value=pip_value,
+    )
+
+def update(high: Any, low: Any, close: Optional[Any] = None) -> None:
+    atr_position_sizer.update(high, low, close=close)
+
+def reset() -> None:
+    atr_position_sizer.reset()

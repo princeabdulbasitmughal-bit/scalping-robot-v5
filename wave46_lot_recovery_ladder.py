@@ -166,3 +166,13 @@ class LotRecoveryLadder:
 
 # Module-level singleton
 lot_recovery_ladder = LotRecoveryLadder()
+
+# Module-level aliases for risk orchestrator integration
+def get_lot(base_lot: float = None) -> float:
+    return lot_recovery_ladder.get_lot(base_lot=base_lot)
+
+def record_trade(won: bool) -> None:
+    lot_recovery_ladder.record_trade(won)
+
+def reset() -> None:
+    lot_recovery_ladder.reset()
