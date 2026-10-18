@@ -87,6 +87,14 @@ class SessionLotBooster:
             self._last_boosted = False
             return float(lot)
 
+    def is_entry_blocked(self) -> bool:
+        """Unified risk interface check (always allows entry)."""
+        return False
+
+    def is_blocked(self) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked()
+
     def info(self, now_dt: datetime = None) -> dict:
         dt = now_dt or datetime.now(timezone.utc)
         utc_hour = dt.hour
@@ -111,3 +119,29 @@ session_lot_booster = SessionLotBooster(
     min_vol_index=1.3,
     min_win_rate=55.0,
 )
+
+
+def is_entry_blocked() -> bool:
+    """Module-level risk interface check."""
+    return session_lot_booster.is_entry_blocked()
+
+
+def is_blocked() -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return session_lot_booster.is_blocked()
+
+
+def apply_boost(
+    lot: float,
+    vol_index: float = 1.0,
+    win_rate_pct: float = 50.0,
+    now_dt: datetime = None,
+) -> float:
+    """Module-level alias for apply_boost."""
+    return session_lot_booster.apply_boost(
+        lot=lot,
+        vol_index=vol_index,
+        win_rate_pct=win_rate_pct,
+        now_dt=now_dt,
+    )
+

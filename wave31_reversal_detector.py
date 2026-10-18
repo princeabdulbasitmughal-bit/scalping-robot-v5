@@ -287,6 +287,32 @@ class ReversalDetector:
 
             return ("HOLD", 0.0, "no_reversal_condition")
 
+    def is_entry_blocked(self, proposed_signal: Optional[str] = None, now_ts: Optional[float] = None) -> bool:
+        """
+        Unified risk interface check:
+        Blocks entry if proposed signal opposes a detected strong reversal.
+        (e.g., BUY proposed when strong SELL reversal detected, or vice-versa).
+        """
+        if not proposed_signal or not isinstance(proposed_signal, str):
+            return False
+        with self._lock:
+            sig, conf, _ = self.get_reversal_signal(now_ts=now_ts)
+            if sig == "HOLD" and self._last_signal in ("BUY", "SELL"):
+                now = float(now_ts) if (now_ts is not None and not isinstance(now_ts, bool)) else time.time()
+                if now - self._last_signal_time < self._cooldown:
+                    sig = self._last_signal
+                    conf = 0.50
+            prop = proposed_signal.strip().upper()
+            if prop == "BUY" and sig == "SELL" and conf >= 0.30:
+                return True
+            if prop == "SELL" and sig == "BUY" and conf >= 0.30:
+                return True
+            return False
+
+    def is_blocked(self, proposed_signal: Optional[str] = None, now_ts: Optional[float] = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(proposed_signal=proposed_signal, now_ts=now_ts)
+
     # ── State Reset & Info ───────────────────────────────────────────────
     def reset(self) -> None:
         """Reset internal buffers and state."""
@@ -332,3 +358,24 @@ reversal_detector = ReversalDetector(
     price_window=5,
     cooldown_sec=60.0,
 )
+
+
+def is_entry_blocked(proposed_signal: Optional[str] = None, now_ts: Optional[float] = None) -> bool:
+    """Module-level risk interface check."""
+    return reversal_detector.is_entry_blocked(proposed_signal=proposed_signal, now_ts=now_ts)
+
+
+def is_blocked(proposed_signal: Optional[str] = None, now_ts: Optional[float] = None) -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return reversal_detector.is_blocked(proposed_signal=proposed_signal, now_ts=now_ts)
+
+
+def get_reversal_signal(now_ts: Optional[float] = None) -> Tuple[str, float, str]:
+    """Module-level alias for get_reversal_signal."""
+    return reversal_detector.get_reversal_signal(now_ts=now_ts)
+
+
+def update_price(price: float) -> None:
+    """Module-level alias for update_price."""
+    return reversal_detector.update_price(price=price)
+
