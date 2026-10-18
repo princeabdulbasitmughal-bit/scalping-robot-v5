@@ -258,3 +258,13 @@ class SessionOptimizer:
 
 # ── Module-level singleton ─────────────────────────────────────────────────
 session_optimizer = SessionOptimizer()
+
+
+def is_entry_blocked(now_dt: Optional[datetime] = None) -> bool:
+    """Module-level risk check alias."""
+    return session_optimizer.is_entry_blocked(now_dt=now_dt)
+
+
+def is_blocked(now_dt: Optional[datetime] = None) -> bool:
+    """Module-level risk check alias."""
+    return is_entry_blocked(now_dt=now_dt)

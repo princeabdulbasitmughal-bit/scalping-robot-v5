@@ -258,3 +258,13 @@ class ProfitOptimizer:
 # ── Module-level singleton ─────────────────────────────────────────────────
 profit_optimizer = ProfitOptimizer()
 
+
+def is_entry_blocked() -> bool:
+    """Module-level risk check alias."""
+    return profit_optimizer.is_entry_blocked()
+
+
+def is_blocked() -> bool:
+    """Module-level risk check alias."""
+    return is_entry_blocked()
+
