@@ -250,6 +250,26 @@ class ScalpingSwarm100:
         with self._lock:
             return self.last_report
 
+    def is_entry_blocked(self) -> bool:
+        """Returns True if swarm report reflects excessive degraded subagents (>25 WARN out of 100)."""
+        with self._lock:
+            if self.last_report:
+                warn = self.last_report.get("warn_count", 0)
+                if isinstance(warn, (int, float)) and warn > 25:
+                    return True
+            return False
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
+
+
+def is_entry_blocked() -> bool:
+    return False
+
+
+def is_blocked() -> bool:
+    return is_entry_blocked()
+
 
 if __name__ == "__main__":
     swarm = ScalpingSwarm100()

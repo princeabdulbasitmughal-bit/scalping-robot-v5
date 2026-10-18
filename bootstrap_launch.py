@@ -6,7 +6,9 @@ Uses DETACHED_PROCESS so processes survive after this script exits.
 import subprocess
 import os
 import sys
+import threading
 from pathlib import Path
+from typing import Optional, List, Union
 
 # Dynamic resolution — no hardcoded paths
 BASE = Path(__file__).resolve().parent
@@ -22,6 +24,7 @@ CREATE_NEW_PROCESS_GROUP = 0x00000200
 CREATE_NO_WINDOW         = 0x08000000
 
 flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+_lock = threading.RLock()
 
 
 def get_launch_flags() -> int:
@@ -29,25 +32,43 @@ def get_launch_flags() -> int:
     return flags
 
 
-def get_supervisor_command() -> list:
-    """Return command list for launching supervisor."""
-    return [exe, str(SUP)]
+def get_supervisor_command(python_exe: Optional[str] = None, supervisor_script: Optional[Union[str, Path]] = None) -> List[str]:
+    """Return command list for launching supervisor with optional parameter overrides."""
+    with _lock:
+        cmd_exe = str(python_exe) if python_exe is not None else exe
+        cmd_sup = str(supervisor_script) if supervisor_script is not None else str(SUP)
+        return [cmd_exe, cmd_sup]
 
 
-def launch_supervisor(log_path: Path = None):
+def launch_supervisor(log_path: Optional[Union[str, Path]] = None, python_exe: Optional[str] = None, supervisor_script: Optional[Union[str, Path]] = None):
     """Launch supervisor as a detached background process."""
-    target_log = log_path if log_path is not None else (BASE / "supervisor.log")
-    with open(target_log, "a", encoding="utf-8") as log_f:
-        proc = subprocess.Popen(
-            get_supervisor_command(),
-            cwd=str(BASE),
-            creationflags=get_launch_flags(),
-            close_fds=True,
-            stdin=subprocess.DEVNULL,
-            stdout=log_f,
-            stderr=subprocess.STDOUT,
-        )
-    return proc
+    with _lock:
+        target_log = Path(log_path) if log_path is not None else (BASE / "supervisor.log")
+        target_log.parent.mkdir(parents=True, exist_ok=True)
+        with open(target_log, "a", encoding="utf-8") as log_f:
+            proc = subprocess.Popen(
+                get_supervisor_command(python_exe=python_exe, supervisor_script=supervisor_script),
+                cwd=str(BASE),
+                creationflags=get_launch_flags(),
+                close_fds=True,
+                stdin=subprocess.DEVNULL,
+                stdout=log_f,
+                stderr=subprocess.STDOUT,
+            )
+        return proc
+
+
+def is_entry_blocked() -> bool:
+    """Fail-closed risk guard: blocks if supervisor target script is missing."""
+    with _lock:
+        if not SUP.exists():
+            return True
+        return False
+
+
+def is_blocked() -> bool:
+    """Unified risk check alias."""
+    return is_entry_blocked()
 
 
 if __name__ == "__main__":
