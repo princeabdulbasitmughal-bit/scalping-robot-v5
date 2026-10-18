@@ -192,3 +192,16 @@ class TickReversalGuard:
 
 # Module-level singleton
 tick_reversal_guard = TickReversalGuard()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(signal: Any = "BUY", now_ts: Optional[float] = None) -> bool:
+    return tick_reversal_guard.is_entry_blocked(signal=signal, now_ts=now_ts)
+
+def is_blocked(signal: Any = "BUY", now_ts: Optional[float] = None) -> bool:
+    return tick_reversal_guard.is_blocked(signal=signal, now_ts=now_ts)
+
+def update(price: Any) -> None:
+    tick_reversal_guard.update(price)
+
+def reset() -> None:
+    tick_reversal_guard.reset()

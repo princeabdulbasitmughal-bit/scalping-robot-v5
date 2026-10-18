@@ -237,3 +237,19 @@ class RSIOverboughtOversold:
 
 # Module-level singleton
 rsi_filter = RSIOverboughtOversold()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(signal: str) -> bool:
+    return rsi_filter.is_entry_blocked(signal=signal)
+
+def is_blocked(signal: str) -> bool:
+    return rsi_filter.is_blocked(signal=signal)
+
+def update(price: float) -> None:
+    rsi_filter.update(price)
+
+def get_rsi() -> float:
+    return rsi_filter.get_rsi()
+
+def reset() -> None:
+    rsi_filter.reset()
