@@ -191,3 +191,19 @@ class PriceRangeFilter:
 
 # Module-level singleton
 price_range_filter = PriceRangeFilter()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(now_dt: Optional[datetime] = None) -> bool:
+    return price_range_filter.is_entry_blocked(now_dt=now_dt)
+
+def is_blocked(now_dt: Optional[datetime] = None) -> bool:
+    return price_range_filter.is_blocked(now_dt=now_dt)
+
+def update(price: Any, now_dt: Optional[datetime] = None) -> None:
+    price_range_filter.update(price, now_dt=now_dt)
+
+def get_range_pips(now_dt: Optional[datetime] = None) -> float:
+    return price_range_filter.get_range_pips(now_dt=now_dt)
+
+def reset() -> None:
+    price_range_filter.reset()

@@ -182,6 +182,10 @@ class MATrendFilter:
         """Boolean alias for is_signal_blocked."""
         return bool(self.is_signal_blocked(signal, price=price))
 
+    def is_blocked(self, signal: Any, price: Optional[float] = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(signal, price=price)
+
     def is_trading_allowed(self, signal: Any, price: Optional[float] = None) -> Tuple[bool, str]:
         """Returns (allowed: bool, reason: str)."""
         res = self.is_signal_blocked(signal, price=price)
@@ -219,3 +223,19 @@ class MATrendFilter:
 
 # Module-level singleton
 ma_trend_filter = MATrendFilter()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(signal: Any, price: Optional[float] = None) -> bool:
+    return ma_trend_filter.is_entry_blocked(signal, price=price)
+
+def is_blocked(signal: Any, price: Optional[float] = None) -> bool:
+    return ma_trend_filter.is_blocked(signal, price=price)
+
+def update(price: Any) -> None:
+    ma_trend_filter.update(price)
+
+def get_ema() -> float:
+    return ma_trend_filter.get_ema()
+
+def reset() -> None:
+    ma_trend_filter.reset()
