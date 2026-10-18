@@ -518,6 +518,16 @@ class AlertSystem:
                 break
 
 
+def is_entry_blocked() -> bool:
+    """Module-level risk check alias."""
+    return False
+
+
+def is_blocked() -> bool:
+    """Module-level risk check alias."""
+    return is_entry_blocked()
+
+
 def main():
     system = AlertSystem()
     system.run()

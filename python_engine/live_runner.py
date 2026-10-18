@@ -225,9 +225,28 @@ class ScalpingLiveRunner:
             self.robot.open_positions = []
             self.trades_history = []
 
+    def is_entry_blocked(self) -> bool:
+        """Returns True if live runner indicates critical drawdown or depleted equity."""
+        with self._lock:
+            if self.equity <= 0.0 or self.balance <= 0.0:
+                return True
+            if self.daily_pnl <= -150.0:
+                return True
+            return False
+
+    def is_blocked(self) -> bool:
+        return self.is_entry_blocked()
+
+
+def is_entry_blocked() -> bool:
+    return False
+
+
+def is_blocked() -> bool:
+    return is_entry_blocked()
+
 
 if __name__ == "__main__":
-
     runner = ScalpingLiveRunner()
     print("Scalping Robot V5 Live Runner Initialized.")
     for _ in range(5):
