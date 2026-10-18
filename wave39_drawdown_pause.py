@@ -99,6 +99,10 @@ class DrawdownPause:
 
             return False
 
+    def is_blocked(self, balance: float = None, now_ts: float = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(balance=balance, now_ts=now_ts)
+
     # ------------------------------------------------------------------
     def seconds_remaining(self, now_ts: float = None) -> float:
         now = now_ts if now_ts is not None else time.time()
@@ -125,3 +129,16 @@ class DrawdownPause:
 
 # Module-level singleton
 drawdown_pause = DrawdownPause()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(balance: float = None, now_ts: float = None) -> bool:
+    return drawdown_pause.is_entry_blocked(balance=balance, now_ts=now_ts)
+
+def is_blocked(balance: float = None, now_ts: float = None) -> bool:
+    return drawdown_pause.is_entry_blocked(balance=balance, now_ts=now_ts)
+
+def update(equity: float, now_ts: float = None) -> None:
+    return drawdown_pause.update(equity, now_ts=now_ts)
+
+def reset() -> None:
+    return drawdown_pause.reset()

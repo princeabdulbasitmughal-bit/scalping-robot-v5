@@ -106,6 +106,10 @@ class VolatilityBreaker:
         with self._lock:
             return now < self._block_until
 
+    def is_blocked(self, now_ts: float = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(now_ts=now_ts)
+
     def seconds_remaining(self, now_ts: float = None) -> float:
         now = now_ts if now_ts is not None else time.time()
         with self._lock:
@@ -131,3 +135,16 @@ class VolatilityBreaker:
 
 # Module-level singleton
 volatility_breaker = VolatilityBreaker()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(now_ts: float = None) -> bool:
+    return volatility_breaker.is_entry_blocked(now_ts=now_ts)
+
+def is_blocked(now_ts: float = None) -> bool:
+    return volatility_breaker.is_entry_blocked(now_ts=now_ts)
+
+def update(price: float, now_ts: float = None):
+    return volatility_breaker.update(price, now_ts=now_ts)
+
+def reset():
+    return volatility_breaker.reset()
