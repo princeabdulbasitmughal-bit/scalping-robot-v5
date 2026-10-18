@@ -158,3 +158,14 @@ class SpikeFilter:
 
 # Module-level singleton
 spike_filter = SpikeFilter()
+
+
+def is_entry_blocked(now_ts: float = None) -> bool:
+    """Module-level risk interface check."""
+    return spike_filter.is_entry_blocked(now_ts=now_ts)
+
+
+def is_blocked(now_ts: float = None) -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return spike_filter.is_blocked(now_ts=now_ts)
+

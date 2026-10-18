@@ -128,3 +128,19 @@ class NewsGuard:
 
 # Module-level singleton
 news_guard = NewsGuard()
+
+
+def is_entry_blocked(now_ts: float = None) -> bool:
+    """Module-level risk interface check."""
+    return news_guard.is_entry_blocked(now_ts=now_ts)
+
+
+def is_blocked(now_ts: float = None) -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return news_guard.is_blocked(now_ts=now_ts)
+
+
+def is_trading_allowed(now_ts: float = None) -> tuple:
+    """Module-level alias for is_trading_allowed."""
+    return news_guard.is_trading_allowed(now_ts=now_ts)
+
