@@ -101,6 +101,15 @@ class DrawdownAccelerator:
         with self._lock:
             return self._get_multiplier()
 
+    def is_entry_blocked(self) -> bool:
+        """Unified risk interface check (returns True only if multiplier <= 0)."""
+        with self._lock:
+            return self._get_multiplier() <= 0.0
+
+    def is_blocked(self) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked()
+
     def info(self) -> dict:
         """Return status dict for live_status.json and telemetry."""
         with self._lock:
@@ -143,3 +152,24 @@ class DrawdownAccelerator:
 
 # Module-level singleton
 drawdown_accelerator = DrawdownAccelerator()
+
+
+def is_entry_blocked() -> bool:
+    """Module-level risk interface check."""
+    return drawdown_accelerator.is_entry_blocked()
+
+
+def is_blocked() -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return drawdown_accelerator.is_blocked()
+
+
+def apply_lot(lot: float) -> float:
+    """Module-level alias for apply_lot."""
+    return drawdown_accelerator.apply_lot(lot=lot)
+
+
+def get_multiplier() -> float:
+    """Module-level alias for get_multiplier."""
+    return drawdown_accelerator.get_multiplier()
+

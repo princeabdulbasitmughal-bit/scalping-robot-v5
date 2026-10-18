@@ -127,6 +127,19 @@ class DailyProfitLock:
 
     apply_min_score = get_min_score
 
+    def is_entry_blocked(self, score: float = None) -> bool:
+        """Unified risk interface check."""
+        with self._lock:
+            if not self._protect_mode:
+                return False
+            if score is not None and not isinstance(score, bool):
+                return score < self._protect_score
+            return False
+
+    def is_blocked(self, score: float = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(score=score)
+
     def info(self) -> dict:
         """Summary dict for live_status.json."""
         with self._lock:
@@ -147,3 +160,14 @@ daily_profit_lock = DailyProfitLock(
     protect_lot=_PROTECT_LOT,
     protect_min_score=_PROTECT_MIN_SCORE,
 )
+
+
+def is_entry_blocked(score: float = None) -> bool:
+    """Module-level risk interface check."""
+    return daily_profit_lock.is_entry_blocked(score=score)
+
+
+def is_blocked(score: float = None) -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return daily_profit_lock.is_blocked(score=score)
+
