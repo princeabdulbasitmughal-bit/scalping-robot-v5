@@ -179,10 +179,10 @@ class RiskManager:
         self,
         balance: float,
         equity: float,
-        daily_pnl: float,
-        daily_loss: float,
-        open_positions: List[Dict],
-        new_signal: str,
+        daily_pnl: float = 0.0,
+        daily_loss: float = 0.0,
+        open_positions: Optional[List[Dict]] = None,
+        new_signal: str = "BUY",
         now_ts: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
@@ -193,6 +193,7 @@ class RiskManager:
           "lot_scale": float (1.0 = full size, 0.5 = half, etc.)
         }
         """
+        positions = open_positions if open_positions is not None else []
         if balance is None or isinstance(balance, bool):
             return {"allowed": False, "reason": "INVALID_BALANCE", "lot_scale": 0.0}
         try:
@@ -224,7 +225,7 @@ class RiskManager:
         if not self.equity_curve_ok(eq):
             return {"allowed": False, "reason": f"EQUITY_BELOW_EMA ({eq:.0f}<{self._equity_ema:.0f})", "lot_scale": 0.0}
 
-        if not self.correlation_ok(open_positions, new_signal):
+        if not self.correlation_ok(positions, new_signal):
             return {"allowed": False, "reason": f"CORRELATION_BLOCK ({new_signal} already open)", "lot_scale": 0.0}
 
         # Daily loss limit hard gate
