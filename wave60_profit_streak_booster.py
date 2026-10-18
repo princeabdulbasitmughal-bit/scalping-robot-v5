@@ -173,3 +173,31 @@ class ProfitStreakBooster:
 
 # Module-level singleton
 profit_streak_booster = ProfitStreakBooster()
+
+# Module-level aliases for risk orchestrator integration
+def record_trade(won: Any) -> None:
+    profit_streak_booster.record_trade(won)
+
+def get_tp_multiplier() -> float:
+    return profit_streak_booster.get_tp_multiplier()
+
+def adjust_tp(base_tp_pips: Any) -> float:
+    return profit_streak_booster.adjust_tp(base_tp_pips)
+
+def is_in_streak() -> bool:
+    return profit_streak_booster.is_in_streak()
+
+def is_entry_blocked(*args: Any, **kwargs: Any) -> bool:
+    """Booster never blocks entries."""
+    return False
+
+def is_blocked(*args: Any, **kwargs: Any) -> bool:
+    """Booster never blocks entries."""
+    return False
+
+def reset() -> None:
+    profit_streak_booster.reset()
+
+def info() -> dict:
+    return profit_streak_booster.info()
+

@@ -73,8 +73,16 @@ class OpeningRangeBreakout:
     """
 
     def __init__(self, min_ticks: int = _MIN_TICKS, window_seconds: int = _ORB_WINDOW_SECONDS):
-        self._min_ticks = max(1, int(min_ticks))
-        self._window_seconds = max(60, int(window_seconds))
+        try:
+            self._min_ticks = max(1, int(min_ticks))
+        except (ValueError, TypeError):
+            self._min_ticks = _MIN_TICKS
+
+        try:
+            self._window_seconds = max(60, int(window_seconds))
+        except (ValueError, TypeError):
+            self._window_seconds = _ORB_WINDOW_SECONDS
+
         self._session_start: Optional[float] = None
         self._or_high: Optional[float] = None
         self._or_low: Optional[float] = None
@@ -193,7 +201,15 @@ class OpeningRangeBreakout:
                 if self._or_high is None or self._or_low is None:
                     return BlockResult(False, "range_not_established")
 
-                curr_p = float(price) if price is not None and math.isfinite(float(price)) and float(price) > 0 else self._last_price
+                curr_p = self._last_price
+                if price is not None and not isinstance(price, bool):
+                    try:
+                        p_val = float(price)
+                        if math.isfinite(p_val) and p_val > 0:
+                            curr_p = p_val
+                    except (ValueError, TypeError):
+                        pass
+
                 or_h = self._or_high
                 or_l = self._or_low
 
@@ -221,6 +237,10 @@ class OpeningRangeBreakout:
     def is_entry_blocked(self, signal: Any, price: Optional[float] = None, now_dt: Optional[datetime] = None) -> bool:
         """Boolean alias for is_signal_blocked."""
         return bool(self.is_signal_blocked(signal, price=price, now_dt=now_dt))
+
+    def is_blocked(self, signal: Any, price: Optional[float] = None, now_dt: Optional[datetime] = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(signal, price=price, now_dt=now_dt)
 
     def get_range_pips(self, pip_size: float = 0.1) -> float:
         """Return the opening range size in pips (XAUUSD: pip_size=0.1)."""
@@ -252,3 +272,26 @@ class OpeningRangeBreakout:
 
 # Module-level singleton
 opening_range_breakout = OpeningRangeBreakout()
+
+# Module-level aliases for risk orchestrator integration
+def is_signal_blocked(signal: Any, price: Optional[float] = None, now_dt: Optional[datetime] = None) -> BlockResult:
+    return opening_range_breakout.is_signal_blocked(signal, price=price, now_dt=now_dt)
+
+def is_entry_blocked(signal: Any, price: Optional[float] = None, now_dt: Optional[datetime] = None) -> bool:
+    return opening_range_breakout.is_entry_blocked(signal, price=price, now_dt=now_dt)
+
+def is_blocked(signal: Any, price: Optional[float] = None, now_dt: Optional[datetime] = None) -> bool:
+    return opening_range_breakout.is_blocked(signal, price=price, now_dt=now_dt)
+
+def update(price: Any, now_dt: Optional[datetime] = None) -> None:
+    opening_range_breakout.update(price, now_dt=now_dt)
+
+def get_range_pips(pip_size: float = 0.1) -> float:
+    return opening_range_breakout.get_range_pips(pip_size=pip_size)
+
+def reset() -> None:
+    opening_range_breakout.reset()
+
+def info() -> dict:
+    return opening_range_breakout.info()
+
