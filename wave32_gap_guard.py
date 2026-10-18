@@ -170,3 +170,24 @@ class GapGuard:
 
 # Module-level singleton
 gap_guard = GapGuard()
+
+
+def is_entry_blocked(now_ts: Optional[float] = None) -> bool:
+    """Module-level risk interface check."""
+    return gap_guard.is_entry_blocked(now_ts=now_ts)
+
+
+def is_blocked(now_ts: Optional[float] = None) -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return gap_guard.is_blocked(now_ts=now_ts)
+
+
+def is_trading_allowed(now_ts: Optional[float] = None) -> Tuple[bool, str]:
+    """Module-level alias for is_trading_allowed."""
+    return gap_guard.is_trading_allowed(now_ts=now_ts)
+
+
+def update_price(price: Any, now_ts: Optional[float] = None) -> None:
+    """Module-level alias for update_price."""
+    return gap_guard.update_price(price=price, now_ts=now_ts)
+

@@ -193,6 +193,14 @@ class PartialCloseManager:
             logger.warning(f"[WAVE33] check_position error: {exc}")
         return False
 
+    def is_entry_blocked(self) -> bool:
+        """Unified risk interface check (always allows entry)."""
+        return False
+
+    def is_blocked(self) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked()
+
     def info(self) -> dict:
         with self._lock:
             return {
@@ -208,3 +216,44 @@ class PartialCloseManager:
 
 # Module-level singleton
 partial_close_manager = PartialCloseManager()
+
+
+def is_entry_blocked() -> bool:
+    """Module-level risk interface check."""
+    return partial_close_manager.is_entry_blocked()
+
+
+def is_blocked() -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return partial_close_manager.is_blocked()
+
+
+def check_position(
+    ticket: Any,
+    direction: str,
+    entry_price: Any,
+    current_price: Any,
+    tp_price: Any,
+    sl_price: Any = 0.0,
+    lot: Any = 0.02,
+) -> bool:
+    """Module-level alias for check_position."""
+    return partial_close_manager.check_position(
+        ticket=ticket,
+        direction=direction,
+        entry_price=entry_price,
+        current_price=current_price,
+        tp_price=tp_price,
+        sl_price=sl_price,
+        lot=lot,
+    )
+
+
+def get_close_lot(
+    lot: Any,
+    min_lot: float = 0.01,
+    lot_step: float = 0.01,
+) -> float:
+    """Module-level alias for get_close_lot."""
+    return partial_close_manager.get_close_lot(lot=lot, min_lot=min_lot, lot_step=lot_step)
+
