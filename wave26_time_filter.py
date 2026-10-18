@@ -248,3 +248,22 @@ class TimeFilter:
 
 # Module-level singleton
 time_filter = TimeFilter()
+
+
+def is_entry_blocked(now_utc: datetime.datetime | int | float | str | None = None) -> bool:
+    """Module-level risk interface check."""
+    return time_filter.is_entry_blocked(now_utc=now_utc)
+
+
+def is_blocked(now_utc: datetime.datetime | int | float | str | None = None) -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return time_filter.is_blocked(now_utc=now_utc)
+
+
+def is_trading_allowed(
+    now_utc: datetime.datetime | int | float | str | None = None,
+    update_state: bool = True,
+) -> Tuple[bool, str]:
+    """Module-level alias for is_trading_allowed."""
+    return time_filter.is_trading_allowed(now_utc=now_utc, update_state=update_state)
+

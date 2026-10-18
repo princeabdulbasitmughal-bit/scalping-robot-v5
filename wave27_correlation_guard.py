@@ -142,6 +142,15 @@ class CorrelationGuard:
                 return False, reason
             return True, ""
 
+    def is_entry_blocked(self, now_ts: Optional[float] = None) -> bool:
+        """Unified risk interface check for trade entry blocking."""
+        allowed, _ = self.is_trading_allowed(now_ts=now_ts)
+        return not allowed
+
+    def is_blocked(self, now_ts: Optional[float] = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(now_ts=now_ts)
+
     def info(self, now_ts: Optional[float] = None) -> dict:
         """Return status dict for live_status.json."""
         now = float(now_ts) if (now_ts is not None and not isinstance(now_ts, bool)) else time.monotonic()
@@ -260,3 +269,19 @@ class CorrelationGuard:
 
 # Module-level singleton
 correlation_guard = CorrelationGuard()
+
+
+def is_entry_blocked(now_ts: Optional[float] = None) -> bool:
+    """Module-level risk interface check."""
+    return correlation_guard.is_entry_blocked(now_ts=now_ts)
+
+
+def is_blocked(now_ts: Optional[float] = None) -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return correlation_guard.is_blocked(now_ts=now_ts)
+
+
+def is_trading_allowed(now_ts: Optional[float] = None) -> Tuple[bool, str]:
+    """Module-level alias for is_trading_allowed."""
+    return correlation_guard.is_trading_allowed(now_ts=now_ts)
+
