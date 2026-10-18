@@ -213,3 +213,19 @@ class CandlePatternFilter:
 
 # Module-level singleton
 candle_pattern_filter = CandlePatternFilter()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(signal: Any = "BUY") -> bool:
+    return candle_pattern_filter.is_entry_blocked(signal=signal)
+
+def is_blocked(signal: Any = "BUY") -> bool:
+    return candle_pattern_filter.is_blocked(signal=signal)
+
+def update(price: Any, now_ts: Optional[float] = None) -> None:
+    candle_pattern_filter.update(price, now_ts=now_ts)
+
+def update_candle(o: float, h: float, l: float, c: float) -> None:
+    candle_pattern_filter.update_candle(o, h, l, c)
+
+def reset() -> None:
+    candle_pattern_filter.reset()

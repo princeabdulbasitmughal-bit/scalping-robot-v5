@@ -267,3 +267,16 @@ class SessionPnLTracker:
 
 # Module-level singleton
 session_pnl_tracker = SessionPnLTracker()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(now_dt: Optional[datetime] = None) -> bool:
+    return session_pnl_tracker.is_entry_blocked(now_dt=now_dt)
+
+def is_blocked(now_dt: Optional[datetime] = None) -> bool:
+    return session_pnl_tracker.is_entry_blocked(now_dt=now_dt)
+
+def record_trade(pnl: float, now_dt: Optional[datetime] = None) -> None:
+    session_pnl_tracker.record_trade(pnl, now_dt=now_dt)
+
+def reset() -> None:
+    session_pnl_tracker.reset()
