@@ -168,3 +168,24 @@ class OvernightGuard:
 
 # Module-level singleton
 overnight_guard = OvernightGuard()
+
+
+def is_entry_blocked(now_dt: Optional[datetime] = None) -> bool:
+    """Module-level risk interface check."""
+    return overnight_guard.is_entry_blocked(now_dt=now_dt)
+
+
+def is_blocked(now_dt: Optional[datetime] = None) -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return overnight_guard.is_blocked(now_dt=now_dt)
+
+
+def is_trading_allowed(now_dt: Optional[datetime] = None) -> Tuple[bool, str]:
+    """Module-level alias for is_trading_allowed."""
+    return overnight_guard.is_trading_allowed(now_dt=now_dt)
+
+
+def should_force_close_all(now_dt: Optional[datetime] = None) -> bool:
+    """Module-level alias for should_force_close_all."""
+    return overnight_guard.should_force_close_all(now_dt=now_dt)
+

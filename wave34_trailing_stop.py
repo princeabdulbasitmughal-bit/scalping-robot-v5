@@ -226,6 +226,14 @@ class TrailingStopManager:
             self._total_trails = 0
             self._total_sl_moves = 0
 
+    def is_entry_blocked(self) -> bool:
+        """Unified risk interface check (always allows entry)."""
+        return False
+
+    def is_blocked(self) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked()
+
     # ─────────────────────────────────────────────────────────────
     def info(self) -> dict:
         """Return status dict for live_status.json."""
@@ -248,3 +256,35 @@ class TrailingStopManager:
 
 # Module-level singleton
 trailing_stop_manager = TrailingStopManager()
+
+
+def is_entry_blocked() -> bool:
+    """Module-level risk interface check."""
+    return trailing_stop_manager.is_entry_blocked()
+
+
+def is_blocked() -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return trailing_stop_manager.is_blocked()
+
+
+def update(
+    ticket: Any,
+    direction: str,
+    entry_price: float,
+    current_price: float,
+    current_sl: float,
+    pip_size: float = 0.1,
+    trail_step_pips: float | None = None,
+) -> float | None:
+    """Module-level alias for update."""
+    return trailing_stop_manager.update(
+        ticket=ticket,
+        direction=direction,
+        entry_price=entry_price,
+        current_price=current_price,
+        current_sl=current_sl,
+        pip_size=pip_size,
+        trail_step_pips=trail_step_pips,
+    )
+
