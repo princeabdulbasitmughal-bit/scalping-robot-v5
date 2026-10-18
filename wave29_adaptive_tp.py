@@ -164,6 +164,14 @@ class AdaptiveTp:
 
             return adjusted
 
+    def is_entry_blocked(self) -> bool:
+        """Unified risk interface check (always allows entry)."""
+        return False
+
+    def is_blocked(self) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked()
+
     def info(self) -> Dict[str, Any]:
         with self._lock:
             return {
@@ -194,3 +202,32 @@ adaptive_tp = AdaptiveTp(
     atr_low_threshold=0.04,
     min_tp_pips=5.0,
 )
+
+
+def is_entry_blocked() -> bool:
+    """Module-level risk interface check."""
+    return adaptive_tp.is_entry_blocked()
+
+
+def is_blocked() -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return adaptive_tp.is_blocked()
+
+
+def adjust_tp(
+    base_tp_pips: float,
+    sl_pips: Optional[float] = None,
+    min_rr_ratio: Optional[float] = None,
+) -> float:
+    """Module-level alias for adjust_tp."""
+    return adaptive_tp.adjust_tp(
+        base_tp_pips=base_tp_pips,
+        sl_pips=sl_pips,
+        min_rr_ratio=min_rr_ratio,
+    )
+
+
+def update_price(price: float) -> None:
+    """Module-level alias for update_price."""
+    return adaptive_tp.update_price(price=price)
+

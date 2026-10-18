@@ -129,6 +129,15 @@ class MomentumConfirmation:
 
         return True, ""
 
+    def is_entry_blocked(self, signal: str = "BUY") -> bool:
+        """Unified risk interface check for trade entry blocking."""
+        confirmed, _ = self.is_momentum_confirmed(signal=signal)
+        return not confirmed
+
+    def is_blocked(self, signal: str = "BUY") -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(signal=signal)
+
     def info(self) -> dict:
         """Return status dict for live_status.json."""
         with self._lock:
@@ -159,3 +168,24 @@ class MomentumConfirmation:
 
 # Module-level singleton
 momentum_confirmation = MomentumConfirmation()
+
+
+def is_entry_blocked(signal: str = "BUY") -> bool:
+    """Module-level risk interface check."""
+    return momentum_confirmation.is_entry_blocked(signal=signal)
+
+
+def is_blocked(signal: str = "BUY") -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return momentum_confirmation.is_blocked(signal=signal)
+
+
+def is_momentum_confirmed(signal: str) -> Tuple[bool, str]:
+    """Module-level alias for is_momentum_confirmed."""
+    return momentum_confirmation.is_momentum_confirmed(signal=signal)
+
+
+def update_price(price: Any) -> None:
+    """Module-level alias for update_price."""
+    return momentum_confirmation.update_price(price=price)
+
