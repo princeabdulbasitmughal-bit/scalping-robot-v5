@@ -111,6 +111,10 @@ class ConsecutiveLossGuard:
             logger.debug(f"[WAVE56] is_entry_blocked error: {exc}")
             return True  # Fail-closed
 
+    def is_blocked(self, now_ts: Optional[float] = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(now_ts=now_ts)
+
     # ------------------------------------------------------------------
     # Info API
     # ------------------------------------------------------------------
@@ -135,3 +139,16 @@ class ConsecutiveLossGuard:
 
 # Module-level singleton
 consecutive_loss_guard = ConsecutiveLossGuard()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(now_ts: Optional[float] = None) -> bool:
+    return consecutive_loss_guard.is_entry_blocked(now_ts=now_ts)
+
+def is_blocked(now_ts: Optional[float] = None) -> bool:
+    return consecutive_loss_guard.is_entry_blocked(now_ts=now_ts)
+
+def record_trade(won: bool, now_ts: Optional[float] = None) -> None:
+    consecutive_loss_guard.record_trade(won, now_ts=now_ts)
+
+def reset() -> None:
+    consecutive_loss_guard.reset()

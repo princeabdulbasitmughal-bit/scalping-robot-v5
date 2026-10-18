@@ -75,6 +75,8 @@ class HourlyPnLMap:
     def record_trade(self, pnl: float, now_dt: Optional[datetime] = None) -> None:
         """Call at trade close with USD PnL."""
         try:
+            if pnl is None or isinstance(pnl, bool):
+                return
             pnl_val = float(pnl)
             if not math.isfinite(pnl_val):
                 return
@@ -152,3 +154,13 @@ class HourlyPnLMap:
 
 # Module-level singleton
 hourly_pnl_map = HourlyPnLMap()
+
+# Module-level aliases for risk orchestrator integration
+def get_lot_multiplier(now_dt: Optional[datetime] = None) -> float:
+    return hourly_pnl_map.get_lot_multiplier(now_dt=now_dt)
+
+def record_trade(pnl: float, now_dt: Optional[datetime] = None) -> None:
+    hourly_pnl_map.record_trade(pnl, now_dt=now_dt)
+
+def reset() -> None:
+    hourly_pnl_map.reset()
