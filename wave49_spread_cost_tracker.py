@@ -143,3 +143,16 @@ class SpreadCostTracker:
 
 # Module-level singleton
 spread_cost_tracker = SpreadCostTracker()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(now_dt: Optional[datetime] = None) -> bool:
+    return spread_cost_tracker.is_entry_blocked(now_dt=now_dt)
+
+def is_blocked(now_dt: Optional[datetime] = None) -> bool:
+    return spread_cost_tracker.is_entry_blocked(now_dt=now_dt)
+
+def record_trade(spread_pips: Any, lot_size: Any, now_dt: Optional[datetime] = None) -> None:
+    spread_cost_tracker.record_trade(spread_pips, lot_size, now_dt=now_dt)
+
+def reset() -> None:
+    spread_cost_tracker.reset()

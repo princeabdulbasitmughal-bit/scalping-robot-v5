@@ -125,3 +125,16 @@ class EquityHighWatermark:
 
 # Module-level singleton
 equity_high_watermark = EquityHighWatermark()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(now_ts: Optional[float] = None) -> bool:
+    return equity_high_watermark.is_entry_blocked(now_ts=now_ts)
+
+def is_blocked(now_ts: Optional[float] = None) -> bool:
+    return equity_high_watermark.is_entry_blocked(now_ts=now_ts)
+
+def update(equity: Any, now_ts: Optional[float] = None) -> None:
+    equity_high_watermark.update(equity, now_ts=now_ts)
+
+def reset() -> None:
+    equity_high_watermark.reset()
