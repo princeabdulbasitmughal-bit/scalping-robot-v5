@@ -391,3 +391,13 @@ class RiskManager:
 # ── Module-level singleton ─────────────────────────────────────────────────
 risk_manager = RiskManager()
 risk_manager.load_state()
+
+
+def is_entry_blocked(balance: float = 10000.0, equity: float = 10000.0, **kwargs) -> bool:
+    """Module-level risk check alias."""
+    return risk_manager.is_entry_blocked(balance=balance, equity=equity, **kwargs)
+
+
+def is_blocked(balance: float = 10000.0, equity: float = 10000.0, **kwargs) -> bool:
+    """Module-level risk check alias."""
+    return is_entry_blocked(balance=balance, equity=equity, **kwargs)

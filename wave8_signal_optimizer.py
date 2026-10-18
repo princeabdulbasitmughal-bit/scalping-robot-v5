@@ -80,9 +80,14 @@ class SignalScorer:
     # ── Support / Resistance ──────────────────────────────────────────────────
     def find_sr_levels(self, closes: List[float], window: int = 20) -> Tuple[float, float]:
         """Identify nearest support and resistance from recent price action."""
-        if len(closes) < window:
-            return closes[-1] - 1.0, closes[-1] + 1.0
-        recent = closes[-window:]
+        if not closes or not isinstance(closes, (list, tuple)):
+            return 0.0, 0.0
+        clean = [float(c) for c in closes if c is not None and isinstance(c, (int, float)) and math.isfinite(c)]
+        if not clean:
+            return 0.0, 0.0
+        if len(clean) < window:
+            return clean[-1] - 1.0, clean[-1] + 1.0
+        recent = clean[-window:]
         support = min(recent)
         resistance = max(recent)
         return support, resistance
@@ -288,4 +293,14 @@ class SignalScorer:
 
 # ── Module-level singleton ─────────────────────────────────────────────────
 signal_scorer = SignalScorer()
+
+
+def is_entry_blocked(score: int = 0, threshold: int = 55) -> bool:
+    """Module-level risk check alias."""
+    return signal_scorer.is_entry_blocked(score, threshold)
+
+
+def is_blocked(score: int = 0, threshold: int = 55) -> bool:
+    """Module-level risk check alias."""
+    return is_entry_blocked(score, threshold)
 
