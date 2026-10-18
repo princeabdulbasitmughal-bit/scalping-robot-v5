@@ -84,6 +84,10 @@ class SpreadMomentumGuard:
         with self._lock:
             return now < self._block_until
 
+    def is_blocked(self, now_ts: float = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(now_ts=now_ts)
+
     def seconds_remaining(self, now_ts: float = None) -> float:
         """Seconds until spread block expires."""
         now = now_ts if now_ts is not None else time.time()
@@ -108,3 +112,19 @@ class SpreadMomentumGuard:
 
 # Module-level singleton
 spread_momentum_guard = SpreadMomentumGuard()
+
+
+def is_entry_blocked(now_ts: float = None) -> bool:
+    """Module-level risk interface check."""
+    return spread_momentum_guard.is_entry_blocked(now_ts=now_ts)
+
+
+def is_blocked(now_ts: float = None) -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return spread_momentum_guard.is_blocked(now_ts=now_ts)
+
+
+def update(spread_pips: float, now_ts: float = None) -> None:
+    """Module-level alias for update."""
+    return spread_momentum_guard.update(spread_pips=spread_pips, now_ts=now_ts)
+

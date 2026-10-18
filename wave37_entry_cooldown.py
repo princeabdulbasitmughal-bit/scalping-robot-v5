@@ -56,6 +56,10 @@ class EntryCooldown:
         with self._lock:
             return now < self._cooldown_until
 
+    def is_blocked(self, now_ts: float = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(now_ts=now_ts)
+
     def seconds_remaining(self, now_ts: float = None) -> float:
         """Seconds until cooldown expires."""
         now = now_ts if now_ts is not None else time.time()
@@ -96,3 +100,19 @@ class EntryCooldown:
 
 # Module-level singleton
 entry_cooldown = EntryCooldown()
+
+
+def is_entry_blocked(now_ts: float = None) -> bool:
+    """Module-level risk interface check."""
+    return entry_cooldown.is_entry_blocked(now_ts=now_ts)
+
+
+def is_blocked(now_ts: float = None) -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return entry_cooldown.is_blocked(now_ts=now_ts)
+
+
+def record_trade_close(was_win: bool, pnl: float = 0.0, now_ts: float = None) -> None:
+    """Module-level alias for record_trade_close."""
+    return entry_cooldown.record_trade_close(was_win=was_win, pnl=pnl, now_ts=now_ts)
+
