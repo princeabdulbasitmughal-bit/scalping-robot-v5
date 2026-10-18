@@ -117,6 +117,18 @@ class EquityCurveHalt:
 
         return True, f"eq_ok sum=${window_sum:.2f} slope=${slope:.2f}"
 
+    def is_entry_blocked(self, current_balance: float = None, now_mono: float = None) -> bool:
+        """Unified risk interface check for trade entry blocking."""
+        if current_balance is None:
+            with self._lock:
+                return self._halted
+        allowed, _ = self.is_trading_allowed(current_balance, now_mono=now_mono)
+        return not allowed
+
+    def is_blocked(self, current_balance: float = None, now_mono: float = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(current_balance=current_balance, now_mono=now_mono)
+
     def reset(self) -> None:
         """Reset rolling history and halt status."""
         with self._lock:
@@ -150,3 +162,19 @@ equity_curve_halt = EquityCurveHalt(
     recovery_win_streak=2,
     cooldown_sec=300.0,
 )
+
+
+def is_entry_blocked(current_balance: float = None, now_mono: float = None) -> bool:
+    """Module-level risk interface check."""
+    return equity_curve_halt.is_entry_blocked(current_balance=current_balance, now_mono=now_mono)
+
+
+def is_blocked(current_balance: float = None, now_mono: float = None) -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return equity_curve_halt.is_blocked(current_balance=current_balance, now_mono=now_mono)
+
+
+def is_trading_allowed(current_balance: float, now_mono: float = None) -> tuple:
+    """Module-level alias for is_trading_allowed."""
+    return equity_curve_halt.is_trading_allowed(current_balance=current_balance, now_mono=now_mono)
+

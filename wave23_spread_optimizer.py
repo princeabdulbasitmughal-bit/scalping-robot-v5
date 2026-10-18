@@ -145,6 +145,37 @@ class SpreadOptimizer:
             )
             return True, reason
 
+    def is_entry_blocked(
+        self,
+        spread_pips: float = 1.0,
+        session_name: str = None,
+        vol_index: float = 1.0,
+        now_dt: datetime = None,
+    ) -> bool:
+        """Unified risk interface check for trade entry blocking."""
+        ok, _ = self.is_spread_ok(
+            spread_pips=spread_pips,
+            session_name=session_name,
+            vol_index=vol_index,
+            now_dt=now_dt,
+        )
+        return not ok
+
+    def is_blocked(
+        self,
+        spread_pips: float = 1.0,
+        session_name: str = None,
+        vol_index: float = 1.0,
+        now_dt: datetime = None,
+    ) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(
+            spread_pips=spread_pips,
+            session_name=session_name,
+            vol_index=vol_index,
+            now_dt=now_dt,
+        )
+
     def info(self) -> dict:
         """Summary dict for live_status.json."""
         with self._lock:
@@ -159,3 +190,49 @@ class SpreadOptimizer:
 
 # Module-level singleton
 spread_optimizer = SpreadOptimizer()
+
+
+def is_entry_blocked(
+    spread_pips: float = 1.0,
+    session_name: str = None,
+    vol_index: float = 1.0,
+    now_dt: datetime = None,
+) -> bool:
+    """Module-level risk interface check."""
+    return spread_optimizer.is_entry_blocked(
+        spread_pips=spread_pips,
+        session_name=session_name,
+        vol_index=vol_index,
+        now_dt=now_dt,
+    )
+
+
+def is_blocked(
+    spread_pips: float = 1.0,
+    session_name: str = None,
+    vol_index: float = 1.0,
+    now_dt: datetime = None,
+) -> bool:
+    """Module-level alias for is_entry_blocked."""
+    return spread_optimizer.is_blocked(
+        spread_pips=spread_pips,
+        session_name=session_name,
+        vol_index=vol_index,
+        now_dt=now_dt,
+    )
+
+
+def is_spread_ok(
+    spread_pips: float,
+    session_name: str = None,
+    vol_index: float = 1.0,
+    now_dt: datetime = None,
+) -> tuple:
+    """Module-level alias for is_spread_ok."""
+    return spread_optimizer.is_spread_ok(
+        spread_pips=spread_pips,
+        session_name=session_name,
+        vol_index=vol_index,
+        now_dt=now_dt,
+    )
+
