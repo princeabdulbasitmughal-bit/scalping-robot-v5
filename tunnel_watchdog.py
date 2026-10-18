@@ -56,34 +56,45 @@ def log(msg):
         pass
 
 
-def update_live_status(url: str):
+def calculate_backoff(fail_count: int) -> int:
+    """Calculate exponential backoff progression: 15s, 30s, 60s, 120s, 240s, capped at 300s."""
+    if not isinstance(fail_count, int) or isinstance(fail_count, bool) or fail_count <= 0:
+        return 15
+    return min(300, 15 * (2 ** (fail_count - 1)))
+
+
+def update_live_status(url: str, status_file: Optional[Path] = None):
     """Update live_status.json 'tunnel_url' field atomically."""
     if not url:
         return
+    target_status = status_file if status_file is not None else STATUS_FILE
     try:
         data = {}
-        if STATUS_FILE.exists():
+        if target_status.exists():
             try:
-                data = json.loads(STATUS_FILE.read_text(encoding='utf-8'))
+                data = json.loads(target_status.read_text(encoding='utf-8'))
             except Exception:
                 data = {}
         if data.get('tunnel_url') != url:
             data['tunnel_url'] = url
-            tmp = STATUS_FILE.with_suffix('.tmp')
+            target_status.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target_status.with_suffix('.tmp')
             tmp.write_text(json.dumps(data, indent=2), encoding='utf-8')
-            tmp.replace(STATUS_FILE)
+            tmp.replace(target_status)
             log(f'Updated live_status.json tunnel_url: {url}')
     except Exception as e:
         log(f'Error updating live_status.json: {e}')
 
 
-def set_tunnel_url(url: str):
+def set_tunnel_url(url: str, url_file: Optional[Path] = None, status_file: Optional[Path] = None):
     """Write URL to tunnel_url.txt and update live_status.json."""
     if not url:
         return
+    target_url_file = url_file if url_file is not None else TUNNEL_URL
     try:
-        TUNNEL_URL.write_text(url.strip(), encoding='utf-8')
-        update_live_status(url.strip())
+        target_url_file.parent.mkdir(parents=True, exist_ok=True)
+        target_url_file.write_text(url.strip(), encoding='utf-8')
+        update_live_status(url.strip(), status_file=status_file)
     except Exception as e:
         log(f'Error saving tunnel URL: {e}')
 
@@ -142,21 +153,24 @@ def safe_close(f):
         pass
 
 
-def extract_url() -> Optional[str]:
-    """Extract latest active tunnel URL from serveo stdout log."""
+def extract_url(content: Optional[str] = None, log_file: Optional[Path] = None) -> Optional[str]:
+    """Extract latest active tunnel URL from serveo stdout log or provided content string."""
     try:
-        if not TUNNEL_OUT.exists():
-            return None
-        content = TUNNEL_OUT.read_text(encoding='utf-8', errors='replace')
-        lower = content.lower()
-        if 'expired' in lower or 'connection closed' in lower:
+        target_content = content
+        if target_content is None:
+            target_path = log_file if log_file is not None else TUNNEL_OUT
+            if not target_path.exists():
+                return None
+            target_content = target_path.read_text(encoding='utf-8', errors='replace')
+        lower = target_content.lower()
+        if 'expired' in lower or 'connection closed' in lower or 'session closed' in lower:
             return None
         # Primary match: 'Forwarding HTTP traffic from <url>'
-        matches = re.findall(r'Forwarding HTTP traffic from (https?://\S+)', content)
+        matches = re.findall(r'Forwarding HTTP traffic from (https?://\S+)', target_content)
         if matches:
             return matches[-1].rstrip('.')
         # Secondary fallback: *.serveousercontent.com
-        matches = re.findall(r'https?://[a-zA-Z0-9\-\.]+\.serveousercontent\.com', content)
+        matches = re.findall(r'https?://[a-zA-Z0-9\-\.]+\.serveousercontent\.com', target_content)
         if matches:
             return matches[-1]
     except Exception:
@@ -164,7 +178,7 @@ def extract_url() -> Optional[str]:
     return None
 
 
-def is_tunnel_alive(p) -> bool:
+def is_tunnel_alive(p, content: Optional[str] = None, log_file: Optional[Path] = None) -> bool:
     """
     Check if tunnel process is alive and not expired or dropped.
     Returns False if process terminated or session expired/disconnected.
@@ -172,13 +186,36 @@ def is_tunnel_alive(p) -> bool:
     if p is None or p.poll() is not None:
         return False
     try:
-        if TUNNEL_OUT.exists():
-            content = TUNNEL_OUT.read_text(encoding='utf-8', errors='replace').lower()
-            if 'expired' in content or 'connection closed' in content or 'session closed' in content:
+        target_content = content
+        if target_content is None:
+            target_path = log_file if log_file is not None else TUNNEL_OUT
+            if target_path.exists():
+                target_content = target_path.read_text(encoding='utf-8', errors='replace')
+        if target_content:
+            lower = target_content.lower()
+            if 'expired' in lower or 'connection closed' in lower or 'session closed' in lower:
                 return False
     except Exception:
         pass
     return True
+
+
+def is_entry_blocked() -> bool:
+    """Fail-closed risk guard: returns True if tunnel URL is not established."""
+    try:
+        if not TUNNEL_URL.exists():
+            return True
+        url = TUNNEL_URL.read_text(encoding='utf-8').strip()
+        if not url:
+            return True
+        return False
+    except Exception:
+        return True
+
+
+def is_blocked() -> bool:
+    """Unified risk check alias."""
+    return is_entry_blocked()
 
 
 def wait_for_url(max_wait_sec: int = 15) -> Optional[str]:

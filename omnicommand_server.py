@@ -1266,6 +1266,28 @@ def download_scalper_zip(_auth: None = Security(_require_api_key)):
 
 
 # ---------------------------------------------------------------------------
+# Risk Guard Aliases
+# ---------------------------------------------------------------------------
+def is_entry_blocked() -> bool:
+    """Returns True if live_status reports trading halted, circuit breaker tripped, or kill switch active."""
+    try:
+        status = read_live_status()
+        if status.get("circuit_breaker_fired") or status.get("circuit_breaker_active"):
+            return True
+        rg = status.get("risk_guard") or {}
+        if rg.get("daily_loss_halted") or rg.get("balance_floor_halted") or rg.get("kill_switch_active"):
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def is_blocked() -> bool:
+    """Unified risk check alias."""
+    return is_entry_blocked()
+
+
+# ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
