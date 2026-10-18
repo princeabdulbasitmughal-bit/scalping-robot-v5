@@ -235,3 +235,16 @@ class BalanceFloorGuard:
 
 # Module-level singleton
 balance_floor_guard = BalanceFloorGuard()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(now_dt: Optional[datetime] = None) -> bool:
+    return balance_floor_guard.is_entry_blocked(now_dt=now_dt)
+
+def is_blocked(now_dt: Optional[datetime] = None) -> bool:
+    return balance_floor_guard.is_blocked(now_dt=now_dt)
+
+def update(balance: Any, now_dt: Optional[datetime] = None) -> None:
+    balance_floor_guard.update(balance, now_dt=now_dt)
+
+def reset() -> None:
+    balance_floor_guard.reset()

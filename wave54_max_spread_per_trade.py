@@ -142,3 +142,16 @@ class MaxSpreadPerTrade:
 
 # Module-level singleton
 max_spread_per_trade = MaxSpreadPerTrade()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(spread_pips: Optional[Any] = None) -> bool:
+    return max_spread_per_trade.is_entry_blocked(spread_pips=spread_pips)
+
+def is_blocked(spread_pips: Optional[Any] = None) -> bool:
+    return max_spread_per_trade.is_blocked(spread_pips=spread_pips)
+
+def update(spread_pips: Any) -> None:
+    max_spread_per_trade.update(spread_pips)
+
+def reset() -> None:
+    max_spread_per_trade.reset()
