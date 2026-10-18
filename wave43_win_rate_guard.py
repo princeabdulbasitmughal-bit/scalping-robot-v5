@@ -116,6 +116,10 @@ class WinRateGuard:
             logger.debug(f"[WAVE43] is_entry_blocked error: {exc}")
             return True
 
+    def is_blocked(self, now_ts: Optional[float] = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(now_ts=now_ts)
+
     def seconds_remaining(self, now_ts: Optional[float] = None) -> float:
         """Return remaining seconds of win-rate pause."""
         try:
@@ -153,3 +157,16 @@ class WinRateGuard:
 
 # Module-level singleton
 win_rate_guard = WinRateGuard()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(now_ts: Optional[float] = None) -> bool:
+    return win_rate_guard.is_entry_blocked(now_ts=now_ts)
+
+def is_blocked(now_ts: Optional[float] = None) -> bool:
+    return win_rate_guard.is_entry_blocked(now_ts=now_ts)
+
+def record_trade(won: bool, now_ts: Optional[float] = None) -> None:
+    win_rate_guard.record_trade(won, now_ts=now_ts)
+
+def reset() -> None:
+    win_rate_guard.reset()

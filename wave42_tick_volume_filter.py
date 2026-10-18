@@ -156,6 +156,10 @@ class TickVolumeFilter:
             self._last_block_reason = ""
             return False
 
+    def is_blocked(self, now_ts: Optional[float] = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(now_ts=now_ts)
+
     # ------------------------------------------------------------------
     def get_tick_rate(self, window_sec: Optional[float] = None, now_ts: Optional[float] = None) -> float:
         """
@@ -225,3 +229,16 @@ class TickVolumeFilter:
 
 # Module-level singleton
 tick_volume_filter = TickVolumeFilter()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(now_ts: Optional[float] = None) -> bool:
+    return tick_volume_filter.is_entry_blocked(now_ts=now_ts)
+
+def is_blocked(now_ts: Optional[float] = None) -> bool:
+    return tick_volume_filter.is_entry_blocked(now_ts=now_ts)
+
+def update(now_ts: Optional[float] = None) -> None:
+    tick_volume_filter.update(now_ts=now_ts)
+
+def reset() -> None:
+    tick_volume_filter.reset()
