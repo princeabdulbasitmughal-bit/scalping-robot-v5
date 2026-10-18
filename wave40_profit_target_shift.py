@@ -111,3 +111,16 @@ class ProfitTargetShift:
 
 # Module-level singleton
 profit_target_shift = ProfitTargetShift()
+
+# Module-level aliases for risk orchestrator integration
+def adjust_tp(raw_tp_pips: float, daily_pnl: float) -> float:
+    return profit_target_shift.adjust_tp(raw_tp_pips, daily_pnl)
+
+def reset() -> None:
+    return profit_target_shift.reset()
+
+def get_mode() -> str:
+    return profit_target_shift.mode
+
+def get_tp_factor() -> float:
+    return profit_target_shift.tp_factor

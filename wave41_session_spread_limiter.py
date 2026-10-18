@@ -123,6 +123,10 @@ class SessionSpreadLimiter:
 
         return blocked
 
+    def is_blocked(self, spread_pips: Any, now_dt: Optional[datetime] = None) -> bool:
+        """Alias for is_entry_blocked."""
+        return self.is_entry_blocked(spread_pips, now_dt=now_dt)
+
     # ------------------------------------------------------------------
     def update_limits(self, new_limits: Dict[str, float]) -> None:
         """Thread-safe update of session limits."""
@@ -155,3 +159,16 @@ class SessionSpreadLimiter:
 
 # Module-level singleton
 session_spread_limiter = SessionSpreadLimiter()
+
+# Module-level aliases for risk orchestrator integration
+def is_entry_blocked(spread_pips: Any, now_dt: Optional[datetime] = None) -> bool:
+    return session_spread_limiter.is_entry_blocked(spread_pips, now_dt=now_dt)
+
+def is_blocked(spread_pips: Any, now_dt: Optional[datetime] = None) -> bool:
+    return session_spread_limiter.is_entry_blocked(spread_pips, now_dt=now_dt)
+
+def update_limits(new_limits: Dict[str, float]) -> None:
+    session_spread_limiter.update_limits(new_limits)
+
+def reset() -> None:
+    session_spread_limiter.reset()
