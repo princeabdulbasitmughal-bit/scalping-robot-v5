@@ -140,3 +140,55 @@ class TestSessionTimeFilter:
         with pytest.raises(ValueError):
             # open >= close
             SessionTimeFilter(sessions=[(time(15, 0), time(10, 0))])
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# wave68 — TickVelocityGuard (5 tests)
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestTickVelocityGuard:
+
+    def test_warmup_not_blocked(self):
+        """Before min_warmup_ticks are received, gate is not blocked."""
+        guard = TickVelocityGuard(window_seconds=10.0, min_ticks_per_second=2.0, min_warmup_ticks=5)
+        for _ in range(4):
+            guard.update()
+        assert guard.is_entry_blocked() is False
+
+    def test_sufficient_velocity_not_blocked(self):
+        """High tick velocity keeps gate open."""
+        guard = TickVelocityGuard(window_seconds=5.0, min_ticks_per_second=1.0, min_warmup_ticks=3)
+        for _ in range(10):
+            guard.update()
+        assert guard.is_entry_blocked() is False
+        assert guard.get_velocity() > 0.0
+
+    def test_low_velocity_blocked(self):
+        """When velocity falls below threshold after warmup, gate closes."""
+        guard = TickVelocityGuard(window_seconds=0.1, min_ticks_per_second=100.0, min_warmup_ticks=2)
+        guard.update()
+        guard.update()
+        _time.sleep(0.15)  # wait for window to expire
+        assert guard.is_entry_blocked() is True
+
+    def test_reset_clears_state(self):
+        """reset() clears timestamps and total ticks, returning to warmup."""
+        guard = TickVelocityGuard(window_seconds=0.1, min_ticks_per_second=100.0, min_warmup_ticks=2)
+        guard.update()
+        guard.update()
+        _time.sleep(0.15)
+        assert guard.is_entry_blocked() is True
+        guard.reset()
+        assert guard.is_entry_blocked() is False  # back to warmup
+
+    def test_invalid_parameters_raise(self):
+        """Invalid constructor parameters raise TypeError or ValueError."""
+        with pytest.raises(TypeError):
+            TickVelocityGuard(window_seconds="10")
+        with pytest.raises(ValueError):
+            TickVelocityGuard(window_seconds=-1.0)
+        with pytest.raises(TypeError):
+            TickVelocityGuard(min_warmup_ticks=3.5)
+        with pytest.raises(ValueError):
+            TickVelocityGuard(min_warmup_ticks=0)
+
