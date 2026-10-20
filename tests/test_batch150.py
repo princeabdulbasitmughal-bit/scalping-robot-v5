@@ -1,9 +1,10 @@
 """
 tests/test_batch150.py
 -----------------------
-10 unit tests for Batch 150 wave modules:
+15 unit tests for Batch 150 wave modules:
   • wave66_equity_curve_brake   (5 tests)
   • wave67_session_time_filter  (5 tests)
+  • wave68_tick_velocity_guard  (5 tests)
 
 All tests are deterministic and isolate state via fresh class instances.
 """
@@ -22,9 +23,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import wave66_equity_curve_brake as w66
 import wave67_session_time_filter as w67
+import wave68_tick_velocity_guard as w68
 
 from wave66_equity_curve_brake import EquityCurveBrake
 from wave67_session_time_filter import SessionTimeFilter
+from wave68_tick_velocity_guard import TickVelocityGuard
 
 
 # ════════════════════════════════════════════════════════════════════════════
