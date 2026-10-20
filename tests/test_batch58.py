@@ -208,12 +208,15 @@ def test_alert_system_rate_limiting():
             rate_limit_minutes=15,
         )
 
+        from datetime import datetime, timezone as _tz
         critical_data = {
             "win_rate": 60.0,
             "total_trades": 10,
             "daily_loss": 0.0,
             "balance": 10000.0,
             "open_positions": [],
+            # Provide a recent last_trade_time so stalled-check (>90 min idle) doesn't fire
+            "last_trade_time": datetime.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S"),
         }
 
         # First cycle: alert must trigger and log to file
