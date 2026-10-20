@@ -9,7 +9,7 @@
   "spread_filter_pips": 3.0,
   "heartbeat_interval_sec": 300.0,
   "max_daily_loss_usd": 200.0,
-  "min_balance_usd": 9700.0,
+  "min_balance_usd": 9500.0,
   "daily_profit_target_usd": 200.0,
   "max_positions_per_session": 3,
   "min_time_between_trades_sec": 60,
