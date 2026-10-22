@@ -86,7 +86,7 @@ def record_tick(ts=None) -> None:
                 if len(_intervals) >= MIN_SAMPLES:
                     jitter = _calc_std(_intervals)
                     if jitter >= MAX_JITTER_SECONDS:
-                        _blocked_until = now + COOLDOWN_SECONDS
+                        _blocked_until = time.monotonic() + COOLDOWN_SECONDS
         _last_tick_time = now
 
 
