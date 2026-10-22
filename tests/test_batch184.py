@@ -24,7 +24,7 @@ import wave135_liquidity_hole_spread_guard as w135
 
 
 # ===========================================================================
-# wave134 — Microstructure Katz Fractal Dimension Guard (5 tests)
+# wave134 — Microstructure Sevcik Fractal Dimension Guard (5 tests)
 # ===========================================================================
 
 class TestWave134FractalDimensionGuard:
@@ -45,36 +45,35 @@ class TestWave134FractalDimensionGuard:
             w134.record_tick(price)
 
         d = w134.get_fractal_dimension()
-        assert 1.15 <= d <= 1.85
+        assert 1.15 <= d <= 1.75
         assert w134.is_entry_blocked() is False
         assert w134.is_blocked() is False
 
     # -- T2: Monotonic straight-line move collapses D < 1.15 and blocks --
     def test_straight_line_move_blocks(self):
-        """Strictly straight-line runaway moves produce D ~= 1.0 < 1.15 and block."""
+        """Strictly straight-line runaway moves produce D ~= 1.09 < 1.15 and block."""
         price = 100.0
         w134.record_tick(price)
         for _ in range(18):
-            price += 1.0  # every step is +1.0 in same direction -> d == L -> D == 1.0
+            price += 1.0  # monotonic upward steps
             w134.record_tick(price)
 
         d = w134.get_fractal_dimension()
         assert d < 1.15
         assert w134.is_entry_blocked() is True
 
-    # -- T3: Extreme ping-pong noise drives D > 1.85 and blocks --
+    # -- T3: Extreme ping-pong noise drives D > 1.75 and blocks --
     def test_ping_pong_noise_blocks(self):
-        """Hyper-erratic ping-pong alternating price action expands path length and blocks."""
+        """Hyper-erratic ping-pong alternating price action expands normalized length and blocks."""
         price = 100.0
         w134.record_tick(price)
-        # Alternate price back and forth: 100 -> 100.5 -> 100 -> 100.5
-        # Total displacement d is tiny (0.5), path length L is huge (18 * 0.5 = 9.0)
+        # Alternate price back and forth between 100.0 and 100.5
         for i in range(18):
             price = 100.5 if (i % 2 == 0) else 100.0
             w134.record_tick(price)
 
         d = w134.get_fractal_dimension()
-        assert d > 1.85
+        assert d > 1.75
         assert w134.is_entry_blocked() is True
 
     # -- T4: Invalid inputs safely ignored --

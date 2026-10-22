@@ -1,10 +1,11 @@
 """
 wave134_fractal_dimension_guard.py
 -----------------------------------
-Guard: Microstructure Katz Fractal Dimension Guard
+Guard: Microstructure Sevcik Fractal Dimension Guard
 
-Measures the fractal dimension / topological roughness of high-frequency price paths.
-In balanced markets, price movements exhibit fractal dimension around D ~= 1.5.
+Measures the fractal dimension / topological roughness of high-frequency price paths
+using the Sevcik normalized metric space estimator.
+In balanced liquid markets, price movements exhibit fractal dimension around D ~= 1.4 - 1.5.
 When D collapses towards 1.0, price exhibits straight-line runaway momentum (liquidity vacuum).
 When D surges towards 2.0, price exhibits hyper-erratic ping-pong noise or spoofing.
 
@@ -12,13 +13,15 @@ Logic:
 - Records rolling window of WINDOW_SIZE (default: 20) tick prices.
 - When at least MIN_TICKS (default: 15) prices are collected:
     n = len(prices) - 1
-    L = sum(|price_{i+1} - price_i|)  (total path length)
-    d = max(|price_i - price_0|)       (maximum planar displacement)
-    If L <= 1e-9 or d <= 1e-9:
+    p_min = min(prices), p_max = max(prices)
+    If p_max - p_min <= 1e-9:
         D = 1.0 (flat path)
     Else:
-        D = ln(n) / (ln(n) + ln(d / L))
-- If D < MIN_FRACTAL_DIM (default: 1.15) or D > MAX_FRACTAL_DIM (default: 1.85):
+        x_i = i / n
+        y_i = (prices[i] - p_min) / (p_max - p_min)
+        L' = sum(sqrt((x_{i+1} - x_i)^2 + (y_{i+1} - y_i)^2))
+        D = 1.0 + ln(L') / ln(2 * n)
+- If D < MIN_FRACTAL_DIM (default: 1.15) or D > MAX_FRACTAL_DIM (default: 1.75):
     blocks entries for COOLDOWN_SECONDS (default: 60.0s).
 - Cooldown timer: _blocked_until = time.monotonic() + COOLDOWN_SECONDS.
 - Fail-closed: invalid, non-numeric, boolean, NaN, Inf, and non-positive prices ignored.
@@ -45,7 +48,7 @@ from typing import Optional
 WINDOW_SIZE: int = 20                  # rolling tick buffer size
 MIN_TICKS: int = 15                    # minimum prices to evaluate fractal dimension
 MIN_FRACTAL_DIM: float = 1.15          # lower boundary (runaway knife move)
-MAX_FRACTAL_DIM: float = 1.85          # upper boundary (excessive erratic ping-pong)
+MAX_FRACTAL_DIM: float = 1.75          # upper boundary (excessive erratic ping-pong)
 COOLDOWN_SECONDS: float = 60.0         # duration of protective block
 
 
@@ -63,7 +66,7 @@ _last_d: float = 1.50                  # default to balanced random walk
 # ---------------------------------------------------------------------------
 
 def record_tick(price, ts=None) -> None:
-    """Record tick price and evaluate Katz fractal dimension."""
+    """Record tick price and evaluate Sevcik fractal dimension."""
     if isinstance(price, bool) or not isinstance(price, (int, float)):
         return
     if math.isnan(price) or math.isinf(price) or price <= 0.0:
@@ -77,17 +80,22 @@ def record_tick(price, ts=None) -> None:
 
         if len(_prices) >= MIN_TICKS:
             n = len(_prices) - 1
-            p0 = _prices[0]
-            d = max(abs(p - p0) for p in _prices)
-            total_l = sum(abs(_prices[i + 1] - _prices[i]) for i in range(n))
+            p_min = min(_prices)
+            p_max = max(_prices)
+            spread = p_max - p_min
 
-            if total_l <= 1e-9 or d <= 1e-9:
+            if spread <= 1e-9:
                 dim = 1.0
             else:
-                ratio = d / total_l
-                denominator = math.log(n) + math.log(ratio)
-                if abs(denominator) > 1e-9:
-                    dim = math.log(n) / denominator
+                l_prime = 0.0
+                inv_n = 1.0 / n
+                for i in range(n):
+                    dx = inv_n
+                    dy = (_prices[i + 1] - _prices[i]) / spread
+                    l_prime += math.sqrt(dx * dx + dy * dy)
+
+                if l_prime > 1e-9 and n > 0:
+                    dim = 1.0 + math.log(l_prime) / math.log(2.0 * n)
                 else:
                     dim = 1.0
 
