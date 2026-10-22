@@ -58,7 +58,7 @@ from typing import Dict, Optional, Any
 # ---------------------------------------------------------------------------
 WINDOW_SIZE: int = 25
 MIN_SAMPLES: int = 15
-MAX_VOLUME_CV: float = 2.50               # Volume CV >= 2.50 indicates extreme variance shock
+MAX_VOLUME_CV: float = 1.80               # Volume CV >= 1.80 indicates extreme variance shock
 MAX_BURST_RATIO: float = 4.0              # Max trade >= 4.0x mean volume
 MIN_MEAN_VOLUME: float = 1.0              # 1.0 lot minimum mean volume floor
 BLOCK_TRADE_THRESHOLD: float = 25.0       # 25.0 lots single block trade threshold
