@@ -133,11 +133,8 @@ def test_wave213_normal_diffusive_alternation_no_block():
 
 def test_wave213_persistent_upward_markov_drift_blocks():
     """Persistent buyer-initiated flow with P(+|++) >= 0.85 blocks entries for 45s."""
-    # Feed runs of 4 buys, 1 sell, 4 buys, 1 sell...
-    # (++, +) occurs frequently and overwhelmingly resolves to another buy (+)
-    trades = ["buy", "buy", "buy", "buy", "sell",
-              "buy", "buy", "buy", "buy", "sell",
-              "buy", "buy", "buy", "buy", "sell"]
+    # 8 buys, 1 sell, 8 buys produces P(+|++) ~ 0.92 >= 0.85
+    trades = ["buy"] * 8 + ["sell"] + ["buy"] * 8
     for t in trades:
         wave213.update(side=t)
 
@@ -152,9 +149,7 @@ def test_wave213_persistent_upward_markov_drift_blocks():
 
 def test_wave213_persistent_downward_markov_drift_blocks():
     """Persistent seller-initiated flow with P(-|--) >= 0.85 blocks entries for 45s."""
-    trades = ["sell", "sell", "sell", "sell", "buy",
-              "sell", "sell", "sell", "sell", "buy",
-              "sell", "sell", "sell", "sell", "buy"]
+    trades = ["sell"] * 8 + ["buy"] + ["sell"] * 8
     for t in trades:
         wave213.record_trade(side=t)
 
@@ -184,7 +179,7 @@ def test_wave213_tick_rule_and_input_validation():
 
 def test_wave213_reset_and_status():
     """Reset clears signed trade history, Markov metrics, and active cooldown blocks."""
-    trades = ["buy", "buy", "buy", "buy", "sell"] * 3
+    trades = ["buy"] * 8 + ["sell"] + ["buy"] * 8
     for t in trades:
         wave213.record_trade(side=t)
     assert wave213.is_entry_blocked()
