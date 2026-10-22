@@ -51,9 +51,9 @@ def test_wave248_tight_spreads_no_block():
 
 def test_wave248_spread_volatility_explosion_blocks():
     """Severe effective spread volatility (sigma >= 2.50 bps on N >= 12) blocks entries for 45s."""
-    # Alternating between 1.0 bps and 5.8 bps -> sigma ~ 2.55 bps >= 2.50 bps
+    # Alternating between 1.0 bps and 5.9 bps -> sigma ~ 2.54 bps >= 2.50 bps
     for i in range(14):
-        s = 1.0 if i % 2 == 0 else 5.8
+        s = 1.0 if i % 2 == 0 else 5.9
         wave248.record_effective_spread(spread_bps=s)
 
     assert wave248.is_entry_blocked()
