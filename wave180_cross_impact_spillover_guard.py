@@ -109,7 +109,11 @@ def record_prices(target_price, proxy_price, ts=None) -> None:
                 _blocked_until = time.monotonic() + COOLDOWN_SECONDS
             return
 
-        # Calculate beta
+        # Instantaneous spillover impact based on established cross-asset beta
+        spillover = abs(r_proxy) * max(0.5, abs(_latest_beta))
+        _latest_spillover = spillover
+
+        # Calculate updated rolling beta
         n = len(_returns_pairs)
         sum_t = sum(p[0] for p in _returns_pairs)
         sum_p = sum(p[1] for p in _returns_pairs)
@@ -120,13 +124,9 @@ def record_prices(target_price, proxy_price, ts=None) -> None:
         cov_tp = sum((p[0] - mean_t) * (p[1] - mean_p) for p in _returns_pairs) / n
 
         if var_p > 1e-12:
-            beta = cov_tp / var_p
+            _latest_beta = cov_tp / var_p
         else:
-            beta = 1.0
-
-        _latest_beta = beta
-        spillover = abs(r_proxy) * max(0.5, abs(beta))
-        _latest_spillover = spillover
+            _latest_beta = 1.0
 
         if abs(r_proxy) >= MAX_PROXY_SHOCK_BPS or spillover >= MAX_SPILLOVER_BPS:
             _blocked_until = time.monotonic() + COOLDOWN_SECONDS
