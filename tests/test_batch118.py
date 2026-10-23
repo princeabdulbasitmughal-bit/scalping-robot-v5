@@ -91,11 +91,11 @@ def test_watchdog_detect_restart_reason():
     # Process healthy
     mock_alive_proc = MagicMock()
     mock_alive_proc.poll.return_value = None
-    with patch("watchdog_runner._memory_check", return_value=120.0):
+    with patch("watchdog_runner._memory_check", return_value=120.0), patch("watchdog_runner.status_age", return_value=10.0):
         assert detect_restart_reason(mock_alive_proc) is None
 
     # Process OOM (>500MB)
-    with patch("watchdog_runner._memory_check", return_value=550.0):
+    with patch("watchdog_runner._memory_check", return_value=550.0), patch("watchdog_runner.status_age", return_value=10.0):
         assert detect_restart_reason(mock_alive_proc) == "OOM: memory > 500MB"
 
 
