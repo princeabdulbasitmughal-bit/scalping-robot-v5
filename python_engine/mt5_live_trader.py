@@ -2026,7 +2026,7 @@ class MT5LiveTrader:
                     # b. Volatility filter: if price moved more than 5 pips in last candle, skip entry
                     if self.check_volatility_spike():
                         msg = "VOLATILITY SPIKE: skipping entry"
-                        logger.info(msg)
+                        logger.debug(msg)
                         self._save_state()
                         return
 
