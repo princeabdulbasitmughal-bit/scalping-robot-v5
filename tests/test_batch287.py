@@ -157,13 +157,13 @@ class TestWave341InterArrivalCovGuard:
         """Extremely bursty arrivals (high CoV) should trigger BURSTY_INTER_ARRIVAL."""
         guard = self._make_guard(high_cov_threshold=2.0, low_cov_threshold=0.01)
         t0 = time.monotonic()
-        # Alternating very short and very long intervals -> high CoV
+        # Burst of rapid arrivals followed by long lull -> high CoV
         ts = t0
         for i in range(25):
-            if i % 2 == 0:
-                ts += 0.001   # very short
+            if i % 10 == 0 and i > 0:
+                ts += 10.0    # long pause
             else:
-                ts += 10.0    # very long
+                ts += 0.001   # rapid burst
             guard.update(ts)
         assert guard.is_blocked(ts + 0.1), "Bursty arrivals should trigger block"
         assert guard.last_reason == "BURSTY_INTER_ARRIVAL"

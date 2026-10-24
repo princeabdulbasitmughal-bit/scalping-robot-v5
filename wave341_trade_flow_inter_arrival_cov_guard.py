@@ -65,6 +65,7 @@ class Wave341TradeFlowInterArrivalCovGuard:
         self._prev_ts: Optional[float] = None
         self._deltas: deque = deque(maxlen=window_size)
         self._blocked_until = 0.0
+        self._blocked_until_sim = 0.0
         self._last_reason   = ""
 
     # ------------------------------------------------------------------
@@ -107,14 +108,20 @@ class Wave341TradeFlowInterArrivalCovGuard:
                 self._block(ts, _REASON_REG)
 
     def _block(self, timestamp: float, reason: str) -> None:
-        self._blocked_until = time.monotonic() + self._cooldown
+        now_mono = time.monotonic()
+        self._blocked_until = now_mono + self._cooldown
+        if isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool) and timestamp > 0:
+            self._blocked_until_sim = timestamp + self._cooldown
+        else:
+            self._blocked_until_sim = self._blocked_until
         self._last_reason   = reason
 
     # ------------------------------------------------------------------
     def is_blocked(self, current_time: Optional[float] = None) -> bool:
         with self._lock:
-            t = time.monotonic() if current_time is None else current_time
-            return t < self._blocked_until
+            if current_time is not None:
+                return current_time < self._blocked_until_sim
+            return time.monotonic() < self._blocked_until
 
     def is_entry_blocked(self, bid: float, ask: float, ts: float) -> bool:
         return self.is_blocked(ts)
@@ -124,6 +131,7 @@ class Wave341TradeFlowInterArrivalCovGuard:
             self._prev_ts = None
             self._deltas.clear()
             self._blocked_until = 0.0
+            self._blocked_until_sim = 0.0
             self._last_reason   = ""
 
     @property
