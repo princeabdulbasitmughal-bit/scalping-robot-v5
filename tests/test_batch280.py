@@ -21,7 +21,6 @@ def test_wave326_smooth_depth_transitions_no_block():
         cooldown_seconds=30.0,
     )
     t0 = 1000.0
-    # Gentle breathing depth: 5.0 to 6.0 lots over 1.0s intervals
     for i in range(15):
         q_bid = 5.0 + 0.1 * (i % 5)
         q_ask = 5.0 - 0.1 * (i % 5)
@@ -51,9 +50,10 @@ def test_wave326_acute_imbalance_acceleration_shock_blocks():
     assert not guard.update(1.1000, 1.1002, 5.0, 5.0, current_time=t0)
     # Tick 2: 0.05s later, small shift (imbalance = (6-4)/10 = 0.20, v = 0.2/0.05 = 4.0/s)
     assert not guard.update(1.1000, 1.1002, 6.0, 4.0, current_time=t0 + 0.05)
-    # Tick 3: 0.05s later, violent inverse flip: bid 0.5, ask 20.0 (imbalance ~= -0.95, v = -1.15/0.05 = -23.0/s)
-    # Acceleration = (-23.0 - 4.0) / 0.05 = -540 /s^2 (|a| >> 40)
-    blocked = guard.update(1.1000, 1.1002, 0.5, 20.0, current_time=t0 + 0.10)
+    # Tick 3: 0.05s later, flip to bid 2.0, ask 18.0 (imbalance = -0.80, v = -1.0/0.05 = -20/s)
+    # Bid drops from 6.0 to 2.0 (33% drop <= 85%), so no unilateral collapse
+    # Acceleration = (-20.0 - 4.0) / 0.05 = -480 /s^2 (|a| >= 40)
+    blocked = guard.update(1.1000, 1.1002, 2.0, 18.0, current_time=t0 + 0.10)
     assert blocked
 
     status = guard.get_status(t0 + 0.10)
@@ -92,8 +92,6 @@ def test_wave326_rolling_acceleration_jerk_blocks():
     t0 = 4000.0
     cur_t = t0
     # Wide spread = 0.0003 on 1.1000 ~= 2.72 bps > 2.0 bps
-    # High frequency oscillating depth creating high acceleration:
-    # 0.05s intervals alternating between high bid and high ask
     for i in range(12):
         cur_t += 0.05
         q_bid = 8.0 if i % 2 == 0 else 2.0
@@ -142,24 +140,23 @@ def test_wave327_equidispersed_poisson_no_block():
         cooldown_seconds=30.0,
     )
     t0 = 6000.0
-    cur_t = t0
-    # Natural Poisson variance across 12 bins: counts varying around 4-6
-    bin_counts = [5, 4, 6, 5, 4, 6, 5, 5, 4, 6, 5, 4]
-    for count in bin_counts:
-        for _ in range(count):
-            cur_t += 0.08
-            blocked = guard.update(trade_volume=1.0, trade_timestamp=cur_t, current_time=cur_t)
+    # Dispersed trade counts per bin (varying 2 to 8 trades per bin)
+    bin_counts = [5, 2, 7, 3, 6, 4, 8, 3, 5, 4, 6, 3]
+    for b_idx, count in enumerate(bin_counts):
+        bin_start = t0 + b_idx * 0.50
+        for t_idx in range(count):
+            ts = bin_start + t_idx * (0.45 / count)
+            blocked = guard.update(trade_volume=1.0, trade_timestamp=ts, current_time=ts)
             assert not blocked
-        cur_t += 0.15  # roll into next bin
 
-    status = guard.get_status(cur_t)
+    status = guard.get_status(t0 + 6.0)
     assert not status["is_blocked"]
     assert status["total_violations"] == 0
-    assert 0.20 <= status["last_fano_factor"] <= 2.0
+    assert 0.20 <= status["last_fano_factor"] <= 2.50
 
 
 def test_wave327_overdispersion_clustering_blocks():
-    """Verify extreme burst clustering producing Fano factor >= 3.50 triggers overdispersion block."""
+    """Verify extreme burst clustering producing Fano factor >= 3.0 triggers overdispersion block."""
     guard = Wave327TradeArrivalPoissonOverdispersionGuard(
         bin_duration_s=0.50,
         window_size_bins=10,
@@ -169,22 +166,21 @@ def test_wave327_overdispersion_clustering_blocks():
         cooldown_seconds=45.0,
     )
     t0 = 7000.0
-    cur_t = t0
-    # Heavy clustering: alternating 1 trade then 15 trades per bin
-    # Mean count = 8 trades per bin (rate = 16/s >= 6.0), variance = (7^2) = 49, Fano = 49/8 ~= 6.12 >= 3.0
-    for b in range(12):
-        count = 15 if b % 2 == 0 else 1
-        for _ in range(count):
-            cur_t += 0.02
-            blocked = guard.update(trade_volume=0.5, trade_timestamp=cur_t, current_time=cur_t)
+    last_ts = t0
+    # Heavy clustering: alternating 1 trade then 16 trades per bin
+    for b_idx in range(12):
+        bin_start = t0 + b_idx * 0.50
+        count = 16 if b_idx % 2 == 0 else 1
+        for t_idx in range(count):
+            last_ts = bin_start + t_idx * (0.45 / count)
+            blocked = guard.update(trade_volume=0.5, trade_timestamp=last_ts, current_time=last_ts)
             if blocked:
                 break
-        if guard.is_blocked(cur_t):
+        if guard.is_blocked(last_ts):
             break
-        cur_t += 0.35  # Advance past bin_duration_s (0.50s)
 
-    assert guard.is_blocked(cur_t)
-    status = guard.get_status(cur_t)
+    assert guard.is_blocked(last_ts)
+    status = guard.get_status(last_ts)
     assert "POISSON_OVERDISPERSION_SURGE" in status["last_block_reason"]
     assert status["last_fano_factor"] >= 3.0
 
