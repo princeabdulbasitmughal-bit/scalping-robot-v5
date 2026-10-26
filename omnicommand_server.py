@@ -194,7 +194,10 @@ def _read_risk_guard_state(live: dict) -> dict:
     rg.setdefault("date_utc", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
     rg.setdefault("daily_pnl", float(live.get("daily_pnl", 0.0)))
     rg.setdefault("daily_loss_halted", bool(live.get("trading_halted", False)))
-    rg.setdefault("balance_floor_halted", float(live.get("balance", 10000.0)) < 9700.0)
+    if "balance" in live:
+        rg["balance_floor_halted"] = float(live.get("balance", 10000.0)) < float(rg.get("min_balance_usd", 9700.0))
+    else:
+        rg.setdefault("balance_floor_halted", float(live.get("balance", 10000.0)) < float(rg.get("min_balance_usd", 9700.0)))
     rg.setdefault("trade_count_today", int(live.get("daily_trades", 0)))
     rg.setdefault("kill_switch_active", (BASE_DIR / "KILL_SWITCH").exists())
     rg.setdefault("min_balance_usd", 9700.0)

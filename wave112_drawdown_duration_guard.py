@@ -71,7 +71,7 @@ def update(equity) -> None:
             _hwm = eq
             _underwater_since = -1.0
         else:
-            if _underwater_since < 0.0:
+            if _underwater_since == -1.0:
                 _underwater_since = now
             elif (now - _underwater_since) >= MAX_UNDERWATER_SECONDS:
                 _blocked_until = now + COOLDOWN_SECONDS
