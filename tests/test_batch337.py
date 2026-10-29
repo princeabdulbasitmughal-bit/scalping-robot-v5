@@ -70,16 +70,16 @@ class TestWave427CrossTierBetaGuard:
 
     def test_healthy_cross_tier_beta_no_block(self):
         guard = Wave427CrossTierDepthBetaGuard(
-            window_size=8, min_depth_beta=0.30, max_depth_beta=2.0
+            window_size=8, min_depth_beta=0.30, max_depth_beta=2.50
         )
         t0 = time.monotonic()
         # Depth co-moves with beta ~ 1.0: deep depth delta = top depth delta
         for i in range(12):
             val = 100.0 + (10.0 if i % 2 == 0 else -10.0)
-            guard.update(q_top=val, q_deep=val * 2.0, timestamp=t0 + i * 0.1)
+            guard.update(q_top=val, q_deep=val * 1.0, timestamp=t0 + i * 0.1)
 
         assert not guard.is_blocked()
-        assert 0.50 <= guard.depth_beta <= 2.20
+        assert 0.80 <= guard.depth_beta <= 1.20
 
     def test_decoupled_depth_triggers_block(self):
         guard = Wave427CrossTierDepthBetaGuard(
