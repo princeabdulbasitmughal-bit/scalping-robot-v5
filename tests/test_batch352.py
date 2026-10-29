@@ -97,7 +97,7 @@ class TestWave453OrderbookCurvatureAccelerationGuard:
             guard.update([10.0, 20.0], [1.0, 2.0], 1.0)
 
         with pytest.raises(ValueError, match="must have identical length"):
-            guard.update([10.0, 20.0, 30.0], [1.0, 2.0], 1.0)
+            guard.update([10.0, 20.0, 30.0, 40.0], [1.0, 2.0, 3.0], 1.0)
 
         guard.update([10.0, 20.0, 30.0], [1.0, 2.0, 3.0], 1.0)
         with pytest.raises(ValueError, match="timestamp must be strictly monotonic"):
