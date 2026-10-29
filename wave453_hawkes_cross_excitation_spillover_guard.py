@@ -77,6 +77,7 @@ class Wave453HawkesCrossExcitationSpilloverGuard:
         # Event storage: list of (timestamp, channel_id)
         self._events: List[Tuple[float, int]] = []
         self._last_timestamp: Optional[float] = None
+        self._channel_last_ts: Dict[int, float] = {}
 
         # Recursive decay accumulators: R[m, n]
         self._R: np.ndarray = np.zeros((num_channels, num_channels), dtype=np.float64)
@@ -105,16 +106,24 @@ class Wave453HawkesCrossExcitationSpilloverGuard:
         if self._last_timestamp is not None and timestamp <= self._last_timestamp:
             raise ValueError(f"timestamp must be strictly monotonic. Got {timestamp} <= {self._last_timestamp}")
 
-        # Update recursive decay from last event
+        # Update recursive decay from last event across all existing accumulators
         if self._last_timestamp is not None:
             dt = timestamp - self._last_timestamp
             decay = math.exp(-self.decay_beta * dt)
             self._R *= decay
 
-        # Add impulse: event occurred in channel_id, exciting all recipient channels
-        # Cross-excitation accumulator increments
-        self._R[:, channel_id] += 1.0
+        # Self-excitation: event on channel_id directly reinforces channel_id
+        self._R[channel_id, channel_id] += 1.0
 
+        # Cross-excitation: recent activity from other channels n excites channel_id
+        for n, last_t in self._channel_last_ts.items():
+            if n != channel_id:
+                delta_n = timestamp - last_t
+                if delta_n >= 0.0:
+                    weight = math.exp(-self.decay_beta * delta_n)
+                    self._R[channel_id, n] += weight
+
+        self._channel_last_ts[channel_id] = timestamp
         self._last_timestamp = timestamp
         self._events.append((timestamp, channel_id))
         self._channel_counts[channel_id] += 1.0
@@ -207,6 +216,7 @@ class Wave453HawkesCrossExcitationSpilloverGuard:
         """Reset internal history and state."""
         self._events.clear()
         self._last_timestamp = None
+        self._channel_last_ts.clear()
         self._R.fill(0.0)
         self._channel_counts.fill(0.0)
         self.spectral_radius = 0.0

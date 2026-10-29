@@ -56,17 +56,21 @@ def test_subcritical_stationary_arrivals():
         num_channels=3,
         decay_beta=10.0,
         max_spectral_radius=0.88,
+        max_spillover_ratio=0.65,
         min_events_for_decision=15
     )
-    # Slow, equispaced independent arrivals (dt = 0.5s -> e^(-10 * 0.5) = e^-5 ~ 0.0067)
+    # Slow, independent channel bursts (mostly endogenous self-arrivals per channel)
+    # dt = 0.5s -> e^(-10 * 0.5) = e^-5 ~ 0.0067
     t = 100.0
-    for i in range(25):
-        t += 0.5
-        guard.update(t, i % 3)
+    for ch in range(3):
+        for _ in range(8):
+            t += 0.5
+            guard.update(t, ch)
 
     assert not guard._is_blocked
     assert guard._block_reason == "NOMINAL_STATIONARY"
     assert guard.spectral_radius < 0.88
+    assert guard.spillover_ratio < 0.65
 
 
 def test_supercritical_explosive_cascade_blocking():
@@ -96,7 +100,7 @@ def test_cross_spillover_contagion_blocking():
     guard = Wave453HawkesCrossExcitationSpilloverGuard(
         num_channels=4,
         decay_beta=5.0,
-        max_spectral_radius=2.0,  # disable spectral radius check to test spillover
+        max_spectral_radius=1.45,  # high threshold to isolate spillover check
         max_spillover_ratio=0.60,
         min_events_for_decision=15
     )
@@ -107,7 +111,6 @@ def test_cross_spillover_contagion_blocking():
         t += 0.05
         guard.update(t, i % 4)
 
-    diag = {guard.get_diagnostics()}
     assert guard.spillover_ratio > 0.60
     assert guard._is_blocked
     assert "HAWKES_CROSS_SPILLOVER_CONTAGION" in guard._block_reason
