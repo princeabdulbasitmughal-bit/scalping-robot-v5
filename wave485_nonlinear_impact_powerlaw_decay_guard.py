@@ -105,13 +105,11 @@ class Wave485NonlinearImpactPowerlawDecayGuard:
         log_dp = np.log(np.array(valid_dp, dtype=np.float64))
 
         # Check for zero variance in log_q
-        var_q = np.var(log_q)
-        if var_q < 1e-9:
+        if np.var(log_q) < 1e-9:
             return 0.50
 
-        cov = np.cov(log_q, log_dp)[0, 1]
-        alpha = float(cov / var_q)
-        return max(0.10, min(1.50, alpha))
+        slope, _ = np.polyfit(log_q, log_dp, deg=1)
+        return float(max(0.10, min(1.50, slope)))
 
     def evaluate(
         self,
